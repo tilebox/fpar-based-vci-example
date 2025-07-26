@@ -1,0 +1,134 @@
+[
+    {
+        "name": "time",
+        "type": "Timestamp",
+        "description": "Timestamp of the data point, extracted from the 'date' metadata.",
+        "example_value": "2001-01-01T00:00:00Z"
+    },
+    {
+        "name": "geometry",
+        "type": "Polygon",
+        "description": "The bounding box of the GeoTIFF.",
+        "example_value": "POLYGON((-180.0044643 75.0044643, -180.0044643 -56.0044643, 179.9955358 -56.0044643, 179.9955358 75.0044643, -180.0044643 75.0044643))"
+    },
+    {
+        "name": "asset_url",
+        "type": "string",
+        "description": "The location of the source GeoTIFF file.",
+        "example_value": "https://agricultural-production-hotspots.ec.europa.eu/data/MO6_FPAR/MODIS/2001/CF/mt0101FPRCF.txt"
+    },
+    {
+        "name": "creator",
+        "type": "string",
+        "description": "The creator of the file, from the metadata.",
+        "example_value": "VITO"
+    },
+    {
+        "name": "product_version",
+        "type": "string",
+        "description": "The product version, extracted from the description.",
+        "example_value": "V062"
+    },
+    {
+        "name": "sensor_type",
+        "type": "string",
+        "description": "The sensor type, from the metadata.",
+        "example_value": "Terra/Aqua MODIS (500m)"
+    },
+    {
+        "name": "units",
+        "type": "string",
+        "description": "The units of the data, from the metadata.",
+        "example_value": "-"
+    },
+    {
+        "name": "consolidation_period",
+        "type": "string",
+        "description": "The consolidation period, from the metadata.",
+        "example_value": "CF"
+    },
+    {
+        "name": "days",
+        "type": "int64",
+        "description": "The number of days the data represents.",
+        "example_value": 10
+    },
+    {
+        "name": "file_creation",
+        "type": "Timestamp",
+        "description": "The creation timestamp of the file.",
+        "example_value": "2023-09-09T12:14:12Z"
+    },
+    {
+        "name": "flags",
+        "type": "Array[string]",
+        "description": "The flags associated with the data.",
+        "example_value": ["251=other land", "254=water", "255=not processed"]
+    },
+    {
+        "name": "lowest_actual_value",
+        "type": "float64",
+        "description": "The lowest actual value in the data.",
+        "example_value": 0
+    },
+    {
+        "name": "highest_actual_value",
+        "type": "float64",
+        "description": "The highest actual value in the data.",
+        "example_value": 100
+    },
+    {
+        "name": "lowest_possible_value",
+        "type": "float64",
+        "description": "The lowest possible value in the data.",
+        "example_value": 0
+    },
+    {
+        "name": "highest_possible_value",
+        "type": "float64",
+        "description": "The highest possible value in the data.",
+        "example_value": 100
+    },
+    {
+        "name": "lineage",
+        "type": "string",
+        "description": "The lineage of the data.",
+        "example_value": "mt0101FPRCF.tif"
+    },
+    {
+        "name": "program_version",
+        "type": "string",
+        "description": "The program version used to generate the data.",
+        "example_value": "0.1.1"
+    },
+    {
+        "name": "width",
+        "type": "int64",
+        "description": "The width of the image in pixels.",
+        "example_value": 80640
+    },
+    {
+        "name": "height",
+        "type": "int64",
+        "description": "The height of the image in pixels.",
+        "example_value": 29346
+    },
+    {
+        "name": "pixel_size_x",
+        "type": "float64",
+        "description": "The size of a pixel in the x-dimension.",
+        "example_value": 0.004464285715
+    },
+    {
+        "name": "pixel_size_y",
+        "type": "float64",
+        "description": "The size of a pixel in the y-dimension.",
+        "example_value": -0.004464285715
+    },
+    {
+        "name": "crs",
+        "type": "string",
+        "description": "The coordinate reference system.",
+        "example_value": "EPSG:4326"
+    }
+]
