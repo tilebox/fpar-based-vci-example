@@ -16,24 +16,33 @@ import (
 	"github.com/paulmach/orb"
 	"github.com/paulmach/orb/encoding/wkt"
 	pb "github.com/tilebox/dclimate-labs-vci-ingestion/protogen/tilebox/v1"
+	"github.com/tilebox/structconf"
 	"github.com/tilebox/tilebox-go/datasets/v1"
 	ds "github.com/tilebox/tilebox-go/protogen/datasets/v1"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 const (
-	datasetName    = "tilebox.modis_fpar"
-	collectionName = "MODIS"
-	baseURL        = "https://agricultural-production-hotspots.ec.europa.eu/data/MO6_FPAR/MODIS"
-	startYear      = 2000
-	endYear        = 2023
-	dekads         = 36
+	datasetName = "tilebox.modis_fpar"
+	dekads      = 36
 )
 
 func main() {
 	ctx := context.Background()
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
+
+	var cfg Config
+	if err := structconf.LoadAndValidate(&cfg, "ingestion"); err != nil {
+		slog.Error("failed to parse config", "error", err)
+		return
+	}
+
+	ingestionCfg, err := GetIngestionConfig(cfg.DatasetType)
+	if err != nil {
+		slog.Error("failed to get ingestion config", "error", err)
+		return
+	}
 
 	client := datasets.NewClient()
 	dataset, err := client.Datasets.Get(ctx, datasetName)
@@ -42,16 +51,16 @@ func main() {
 		return
 	}
 
-	collection, err := client.Collections.GetOrCreate(ctx, dataset.ID, collectionName)
+	collection, err := client.Collections.GetOrCreate(ctx, dataset.ID, ingestionCfg.CollectionName)
 	if err != nil {
 		slog.Error("failed to get or create collection", "error", err)
 		return
 	}
 
-	for year := startYear; year <= endYear; year++ {
+	for year := ingestionCfg.StartYear; year <= ingestionCfg.EndYear; year++ {
 		for dekad := 1; dekad <= dekads; dekad++ {
-			fileName := fmt.Sprintf("mt%02d%02dFPRCF.txt", year%100, dekad)
-			url := fmt.Sprintf("%s/%d/CF/%s", baseURL, year, fileName)
+			fileName := fmt.Sprintf("%s%02d%02dFPRCF.txt", ingestionCfg.FileNamePrefix, year%100, dekad)
+			url := fmt.Sprintf("%s/%d/CF/%s", ingestionCfg.BaseURL, year, fileName)
 
 			slog.Info("processing file", "url", url)
 
