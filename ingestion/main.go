@@ -25,7 +25,7 @@ const (
 	datasetName    = "tilebox.modis_fpar"
 	collectionName = "MODIS"
 	baseURL        = "https://agricultural-production-hotspots.ec.europa.eu/data/MO6_FPAR/MODIS"
-	startYear      = 2001
+	startYear      = 2000
 	endYear        = 2023
 	dekads         = 36
 )
@@ -57,14 +57,14 @@ func main() {
 
 			req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 			if err != nil {
-				slog.Warn("failed to create request", "url", url, "error", err)
-				continue
+				slog.Error("failed to create request", "url", url, "error", err)
+				return
 			}
 
 			resp, err := http.DefaultClient.Do(req)
 			if err != nil {
-				slog.Warn("failed to fetch file", "url", url, "error", err)
-				continue
+				slog.Error("failed to fetch file", "url", url, "error", err)
+				return
 			}
 			defer resp.Body.Close()
 
@@ -76,51 +76,61 @@ func main() {
 			bodyBytes, err := io.ReadAll(resp.Body)
 			if err != nil {
 				slog.Error("failed to read response body", "url", url, "error", err)
-				continue
+				return
 			}
 
 			metadata, err := parseMetadata(string(bodyBytes))
 			if err != nil {
 				slog.Error("failed to parse metadata", "url", url, "error", err)
-				continue
+				return
 			}
 
 			datapoint, err := mapToDatapoint(metadata, url)
 			if err != nil {
 				slog.Error("failed to map metadata to datapoint", "url", url, "error", err)
-				continue
+				return
 			}
 
-			_, err = client.Datapoints.Ingest(ctx, collection.ID, datapoint, true)
+			datapoints := []*pb.ModisFpar{datapoint}
+			_, err = client.Datapoints.Ingest(ctx, collection.ID, &datapoints, true)
 			if err != nil {
 				slog.Error("failed to ingest datapoint", "url", url, "error", err)
-			} else {
-				slog.Info("successfully ingested datapoint", "url", url)
+				return
 			}
+			slog.Info("successfully ingested datapoint", "url", url)
 		}
 	}
 }
 
 func parseMetadata(body string) (map[string]string, error) {
 	metadata := make(map[string]string)
+	scanner := bufio.NewScanner(strings.NewReader(body))
 
-	// Simple key-value from metadata block
-	re := regexp.MustCompile(`Metadata:\n((?s:.)*?)\nImage Structure Metadata:`)
-	matches := re.FindStringSubmatch(body)
-	if len(matches) > 1 {
-		scanner := bufio.NewScanner(strings.NewReader(matches[1]))
-		kvRe := regexp.MustCompile(`\s*([^=]+?)\s*=\s*(.*)\s*`)
-		for scanner.Scan() {
-			kvMatches := kvRe.FindStringSubmatch(scanner.Text())
-			if len(kvMatches) == 3 {
-				metadata[strings.TrimSpace(kvMatches[1])] = strings.TrimSpace(kvMatches[2])
+	inMetadataSection := false
+	re := regexp.MustCompile(`\s*([^=]+?)\s*=\s*(.*)\s*`)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "Metadata:") {
+			inMetadataSection = true
+			continue
+		}
+		if strings.HasPrefix(line, "Image Structure Metadata:") {
+			inMetadataSection = false
+			continue
+		}
+
+		if inMetadataSection {
+			matches := re.FindStringSubmatch(line)
+			if len(matches) == 3 {
+				metadata[strings.TrimSpace(matches[1])] = strings.TrimSpace(matches[2])
 			}
 		}
 	}
 
 	// Size
 	re = regexp.MustCompile(`Size is (\d+), (\d+)`)
-	matches = re.FindStringSubmatch(body)
+	matches := re.FindStringSubmatch(body)
 	if len(matches) > 2 {
 		metadata["width"] = matches[1]
 		metadata["height"] = matches[2]
@@ -136,9 +146,12 @@ func parseMetadata(body string) (map[string]string, error) {
 
 	// CRS from AUTHORITY
 	re = regexp.MustCompile(`AUTHORITY\["EPSG","(\d+)"\]`)
-	matches = re.FindStringSubmatch(body)
-	if len(matches) > 1 {
-		metadata["crs"] = "EPSG:" + matches[1]
+	allMatches := re.FindAllStringSubmatch(body, -1)
+	if len(allMatches) > 0 {
+		lastMatch := allMatches[len(allMatches)-1]
+		if len(lastMatch) > 1 {
+			metadata["crs"] = "EPSG:" + lastMatch[1]
+		}
 	}
 
 	// Corner Coordinates for Polygon
@@ -163,7 +176,8 @@ func parseMetadata(body string) (map[string]string, error) {
 
 func mapToDatapoint(metadata map[string]string, url string) (*pb.ModisFpar, error) {
 	p := &pb.ModisFpar{}
-	p.SetAssetUrl(url)
+	assetURL := strings.Replace(url, ".txt", ".tif", 1)
+	p.SetAssetUrl(assetURL)
 	p.SetCreator(metadata["creator"])
 	p.SetSensorType(metadata["sensor_type"])
 	p.SetConsolidationPeriod(metadata["consolidation_period"])
@@ -176,8 +190,13 @@ func mapToDatapoint(metadata map[string]string, url string) (*pb.ModisFpar, erro
 		t, err := time.Parse("20060102", val)
 		if err == nil {
 			p.SetTime(timestamppb.New(t))
+		} else {
+			return nil, fmt.Errorf("failed to parse date: %w", err)
 		}
+	} else {
+		return nil, fmt.Errorf("metadata is missing 'date' field")
 	}
+
 	if val, ok := metadata["file_creation"]; ok {
 		t, err := time.Parse("2006-01-02T15:04:05", val)
 		if err == nil {
@@ -235,15 +254,6 @@ func mapToDatapoint(metadata map[string]string, url string) (*pb.ModisFpar, erro
 	// Array fields
 	if val, ok := metadata["flags"]; ok {
 		p.SetFlags(strings.Split(val, ", "))
-	}
-
-	// Extract Product-version from description
-	if val, ok := metadata["description"]; ok {
-		re := regexp.MustCompile(`Product-version=(.*)`)
-		matches := re.FindStringSubmatch(val)
-		if len(matches) > 1 {
-			p.SetProductVersion(matches[1])
-		}
 	}
 
 	// Geometry
