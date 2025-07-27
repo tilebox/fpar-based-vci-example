@@ -4,6 +4,7 @@ go 1.24.4
 
 require (
 	github.com/paulmach/orb v0.11.1
+	github.com/tilebox/structconf v0.0.0-20250521082517-cea50021b9f5
 	github.com/tilebox/tilebox-go v0.0.0-20250722095347-2ca1528dfd36
 	google.golang.org/protobuf v1.36.6
 )
@@ -24,7 +25,6 @@ require (
 	github.com/iancoleman/strcase v0.3.0 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
 	github.com/samber/lo v1.51.0 // indirect
-	github.com/tilebox/structconf v0.0.0-20250521082517-cea50021b9f5 // indirect
 	github.com/urfave/cli/v3 v3.3.3 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
 	go.opentelemetry.io/otel v1.37.0 // indirect

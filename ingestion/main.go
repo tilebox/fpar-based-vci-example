@@ -94,7 +94,7 @@ func main() {
 				return
 			}
 
-			datapoint, err := mapToDatapoint(metadata, url)
+			datapoint, err := mapToDatapoint(metadata, url, year, dekad)
 			if err != nil {
 				slog.Error("failed to map metadata to datapoint", "url", url, "error", err)
 				return
@@ -183,7 +183,7 @@ func parseMetadata(body string) (map[string]string, error) {
 	return metadata, nil
 }
 
-func mapToDatapoint(metadata map[string]string, url string) (*pb.ModisFpar, error) {
+func mapToDatapoint(metadata map[string]string, url string, year int, dekad int) (*pb.ModisFpar, error) {
 	p := &pb.ModisFpar{}
 	assetURL := strings.Replace(url, ".txt", ".tif", 1)
 	p.SetAssetUrl(assetURL)
@@ -193,6 +193,8 @@ func mapToDatapoint(metadata map[string]string, url string) (*pb.ModisFpar, erro
 	p.SetLineage(metadata["lineage"])
 	p.SetProgramVersion(metadata["program"])
 	p.SetCrs(metadata["crs"])
+	p.SetYear(int64(year))
+	p.SetDekad(int64(dekad))
 
 	// Time fields
 	if val, ok := metadata["date"]; ok {

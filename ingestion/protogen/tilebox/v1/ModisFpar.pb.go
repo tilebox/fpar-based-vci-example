@@ -7,8 +7,8 @@
 package v1
 
 import (
-	reflect "reflect"
-	unsafe "unsafe"
+	"reflect"
+	"unsafe"
 
 	v1 "github.com/tilebox/tilebox-go/protogen/datasets/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
@@ -49,6 +49,8 @@ type ModisFpar struct {
 	xxx_hidden_PixelSizeX           float64                `protobuf:"fixed64,21,opt,name=pixel_size_x,json=pixelSizeX"`
 	xxx_hidden_PixelSizeY           float64                `protobuf:"fixed64,22,opt,name=pixel_size_y,json=pixelSizeY"`
 	xxx_hidden_Crs                  *string                `protobuf:"bytes,23,opt,name=crs"`
+	xxx_hidden_Year                 int64                  `protobuf:"varint,24,opt,name=year"`
+	xxx_hidden_Dekad                int64                  `protobuf:"varint,25,opt,name=dekad"`
 	XXX_raceDetectHookData          protoimpl.RaceDetectHookData
 	XXX_presence                    [1]uint32
 	unknownFields                   protoimpl.UnknownFields
@@ -265,6 +267,20 @@ func (x *ModisFpar) GetCrs() string {
 	return ""
 }
 
+func (x *ModisFpar) GetYear() int64 {
+	if x != nil {
+		return x.xxx_hidden_Year
+	}
+	return 0
+}
+
+func (x *ModisFpar) GetDekad() int64 {
+	if x != nil {
+		return x.xxx_hidden_Dekad
+	}
+	return 0
+}
+
 func (x *ModisFpar) SetTime(v *timestamppb.Timestamp) {
 	x.xxx_hidden_Time = v
 }
@@ -283,32 +299,32 @@ func (x *ModisFpar) SetGeometry(v *v1.Geometry) {
 
 func (x *ModisFpar) SetAssetUrl(v string) {
 	x.xxx_hidden_AssetUrl = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 4, 23)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 4, 25)
 }
 
 func (x *ModisFpar) SetCreator(v string) {
 	x.xxx_hidden_Creator = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 5, 23)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 5, 25)
 }
 
 func (x *ModisFpar) SetProductVersion(v string) {
 	x.xxx_hidden_ProductVersion = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 6, 23)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 6, 25)
 }
 
 func (x *ModisFpar) SetSensorType(v string) {
 	x.xxx_hidden_SensorType = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 7, 23)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 7, 25)
 }
 
 func (x *ModisFpar) SetConsolidationPeriod(v string) {
 	x.xxx_hidden_ConsolidationPeriod = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 8, 23)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 8, 25)
 }
 
 func (x *ModisFpar) SetDays(v int64) {
 	x.xxx_hidden_Days = v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 9, 23)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 9, 25)
 }
 
 func (x *ModisFpar) SetFileCreation(v *timestamppb.Timestamp) {
@@ -321,57 +337,67 @@ func (x *ModisFpar) SetFlags(v []string) {
 
 func (x *ModisFpar) SetLowestActualValue(v float64) {
 	x.xxx_hidden_LowestActualValue = v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 12, 23)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 12, 25)
 }
 
 func (x *ModisFpar) SetHighestActualValue(v float64) {
 	x.xxx_hidden_HighestActualValue = v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 13, 23)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 13, 25)
 }
 
 func (x *ModisFpar) SetLowestPossibleValue(v float64) {
 	x.xxx_hidden_LowestPossibleValue = v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 14, 23)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 14, 25)
 }
 
 func (x *ModisFpar) SetHighestPossibleValue(v float64) {
 	x.xxx_hidden_HighestPossibleValue = v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 15, 23)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 15, 25)
 }
 
 func (x *ModisFpar) SetLineage(v string) {
 	x.xxx_hidden_Lineage = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 16, 23)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 16, 25)
 }
 
 func (x *ModisFpar) SetProgramVersion(v string) {
 	x.xxx_hidden_ProgramVersion = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 17, 23)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 17, 25)
 }
 
 func (x *ModisFpar) SetWidth(v int64) {
 	x.xxx_hidden_Width = v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 18, 23)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 18, 25)
 }
 
 func (x *ModisFpar) SetHeight(v int64) {
 	x.xxx_hidden_Height = v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 19, 23)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 19, 25)
 }
 
 func (x *ModisFpar) SetPixelSizeX(v float64) {
 	x.xxx_hidden_PixelSizeX = v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 20, 23)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 20, 25)
 }
 
 func (x *ModisFpar) SetPixelSizeY(v float64) {
 	x.xxx_hidden_PixelSizeY = v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 21, 23)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 21, 25)
 }
 
 func (x *ModisFpar) SetCrs(v string) {
 	x.xxx_hidden_Crs = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 22, 23)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 22, 25)
+}
+
+func (x *ModisFpar) SetYear(v int64) {
+	x.xxx_hidden_Year = v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 23, 25)
+}
+
+func (x *ModisFpar) SetDekad(v int64) {
+	x.xxx_hidden_Dekad = v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 24, 25)
 }
 
 func (x *ModisFpar) HasTime() bool {
@@ -528,6 +554,20 @@ func (x *ModisFpar) HasCrs() bool {
 	return protoimpl.X.Present(&(x.XXX_presence[0]), 22)
 }
 
+func (x *ModisFpar) HasYear() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 23)
+}
+
+func (x *ModisFpar) HasDekad() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 24)
+}
+
 func (x *ModisFpar) ClearTime() {
 	x.xxx_hidden_Time = nil
 }
@@ -633,6 +673,16 @@ func (x *ModisFpar) ClearCrs() {
 	x.xxx_hidden_Crs = nil
 }
 
+func (x *ModisFpar) ClearYear() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 23)
+	x.xxx_hidden_Year = 0
+}
+
+func (x *ModisFpar) ClearDekad() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 24)
+	x.xxx_hidden_Dekad = 0
+}
+
 type ModisFpar_builder struct {
 	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
 
@@ -659,6 +709,8 @@ type ModisFpar_builder struct {
 	PixelSizeX           *float64
 	PixelSizeY           *float64
 	Crs                  *string
+	Year                 *int64
+	Dekad                *int64
 }
 
 func (b0 ModisFpar_builder) Build() *ModisFpar {
@@ -670,74 +722,82 @@ func (b0 ModisFpar_builder) Build() *ModisFpar {
 	x.xxx_hidden_IngestionTime = b.IngestionTime
 	x.xxx_hidden_Geometry = b.Geometry
 	if b.AssetUrl != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 4, 23)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 4, 25)
 		x.xxx_hidden_AssetUrl = b.AssetUrl
 	}
 	if b.Creator != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 5, 23)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 5, 25)
 		x.xxx_hidden_Creator = b.Creator
 	}
 	if b.ProductVersion != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 6, 23)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 6, 25)
 		x.xxx_hidden_ProductVersion = b.ProductVersion
 	}
 	if b.SensorType != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 7, 23)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 7, 25)
 		x.xxx_hidden_SensorType = b.SensorType
 	}
 	if b.ConsolidationPeriod != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 8, 23)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 8, 25)
 		x.xxx_hidden_ConsolidationPeriod = b.ConsolidationPeriod
 	}
 	if b.Days != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 9, 23)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 9, 25)
 		x.xxx_hidden_Days = *b.Days
 	}
 	x.xxx_hidden_FileCreation = b.FileCreation
 	x.xxx_hidden_Flags = b.Flags
 	if b.LowestActualValue != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 12, 23)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 12, 25)
 		x.xxx_hidden_LowestActualValue = *b.LowestActualValue
 	}
 	if b.HighestActualValue != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 13, 23)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 13, 25)
 		x.xxx_hidden_HighestActualValue = *b.HighestActualValue
 	}
 	if b.LowestPossibleValue != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 14, 23)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 14, 25)
 		x.xxx_hidden_LowestPossibleValue = *b.LowestPossibleValue
 	}
 	if b.HighestPossibleValue != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 15, 23)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 15, 25)
 		x.xxx_hidden_HighestPossibleValue = *b.HighestPossibleValue
 	}
 	if b.Lineage != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 16, 23)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 16, 25)
 		x.xxx_hidden_Lineage = b.Lineage
 	}
 	if b.ProgramVersion != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 17, 23)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 17, 25)
 		x.xxx_hidden_ProgramVersion = b.ProgramVersion
 	}
 	if b.Width != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 18, 23)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 18, 25)
 		x.xxx_hidden_Width = *b.Width
 	}
 	if b.Height != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 19, 23)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 19, 25)
 		x.xxx_hidden_Height = *b.Height
 	}
 	if b.PixelSizeX != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 20, 23)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 20, 25)
 		x.xxx_hidden_PixelSizeX = *b.PixelSizeX
 	}
 	if b.PixelSizeY != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 21, 23)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 21, 25)
 		x.xxx_hidden_PixelSizeY = *b.PixelSizeY
 	}
 	if b.Crs != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 22, 23)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 22, 25)
 		x.xxx_hidden_Crs = b.Crs
+	}
+	if b.Year != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 23, 25)
+		x.xxx_hidden_Year = *b.Year
+	}
+	if b.Dekad != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 24, 25)
+		x.xxx_hidden_Dekad = *b.Dekad
 	}
 	return m0
 }
@@ -747,7 +807,7 @@ var File_tilebox_v1_ModisFpar_proto protoreflect.FileDescriptor
 const file_tilebox_v1_ModisFpar_proto_rawDesc = "" +
 	"\n" +
 	"\x1atilebox/v1/ModisFpar.proto\x12\n" +
-	"tilebox.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\"datasets/v1/well_known_types.proto\"\x86\a\n" +
+	"tilebox.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\"datasets/v1/well_known_types.proto\"\xb0\a\n" +
 	"\tModisFpar\x12.\n" +
 	"\x04time\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x04time\x12!\n" +
 	"\x02id\x18\x02 \x01(\v2\x11.datasets.v1.UUIDR\x02id\x12A\n" +
@@ -775,7 +835,9 @@ const file_tilebox_v1_ModisFpar_proto_rawDesc = "" +
 	"pixelSizeX\x12 \n" +
 	"\fpixel_size_y\x18\x16 \x01(\x01R\n" +
 	"pixelSizeY\x12\x10\n" +
-	"\x03crs\x18\x17 \x01(\tR\x03crsB\fZ\n" +
+	"\x03crs\x18\x17 \x01(\tR\x03crs\x12\x12\n" +
+	"\x04year\x18\x18 \x01(\x03R\x04year\x12\x14\n" +
+	"\x05dekad\x18\x19 \x01(\x03R\x05dekadB\fZ\n" +
 	"tilebox/v1b\beditionsp\xe8\a"
 
 var file_tilebox_v1_ModisFpar_proto_msgTypes = make([]protoimpl.MessageInfo, 1)

@@ -6,6 +6,18 @@
         "example_value": "2001-01-01T00:00:00Z"
     },
     {
+        "name": "year",
+        "type": "int64",
+        "description": "The year of the data.",
+        "example_value": 2001
+    },
+    {
+        "name": "dekad",
+        "type": "int64",
+        "description": "The 10-day period of the year (1-36).",
+        "example_value": 1
+    },
+    {
         "name": "geometry",
         "type": "Polygon",
         "description": "The bounding box of the GeoTIFF.",
