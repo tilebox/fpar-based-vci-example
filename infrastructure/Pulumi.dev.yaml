@@ -1,0 +1,3 @@
+config:
+  gcp:project: careful-striker-387117
+  gcp:region: europe-west4
