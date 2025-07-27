@@ -1,0 +1,19 @@
+[project]
+name = "workflow"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "dask>=2025.7.0",
+    "gcsfs>=2025.7.0",
+    "ipykernel>=6.30.0",
+    "numpy>=2.3.2",
+    "obstore>=0.7.1",
+    "rioxarray>=0.19.0",
+    "tilebox-datasets>=0.39.0",
+    "tilebox-storage>=0.39.0",
+    "tilebox-workflows>=0.39.0",
+    "xarray>=2025.7.1",
+    "zarr>=3.1.0",
+]

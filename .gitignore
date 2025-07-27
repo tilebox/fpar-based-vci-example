@@ -1,1 +1,3 @@
 .DS_Store
+infrastructure/__pycache__
+workflow/__pycache__
