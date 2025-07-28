@@ -1,14 +1,14 @@
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 
 import numpy as np
 import rioxarray
 import xarray as xr
 from obstore.auth.google import GoogleCredentialProvider
 from obstore.store import GCSStore
-from tilebox.datasets import Client as DatasetsClient
-from tilebox.workflows import Task, ExecutionContext, Client as WorkflowsClient
-from tilebox.workflows.observability.logging import configure_console_logging, get_logger
+from tilebox.datasets import Client as DatasetsClient  # type: ignore[import-untyped]
+from tilebox.workflows import Task, ExecutionContext, Client as WorkflowsClient  # type: ignore[import-untyped]
+from tilebox.workflows.observability.logging import configure_console_logging, get_logger  # type: ignore[import-untyped]
 from zarr.codecs import BloscCodec
 from zarr.storage import ObjectStore as ZarrObjectStore
 
@@ -83,8 +83,8 @@ class InitializeZarrStore(Task):
         dummy_data = np.empty(shape, dtype=np.float32)
         ds = xr.Dataset({"fpar": (dims, dummy_data)}, coords=coords)
 
-        encoding = {"fpar": {"compressors": (COMPRESSOR,), "chunks": chunks}}
-        ds.to_zarr(zarr_store, mode='w', compute=False, encoding=encoding, zarr_format=3)  # type: ignore[arg-type]
+        encoding = {"fpar": {"compressor": COMPRESSOR, "chunks": chunks}}
+        ds.to_zarr(zarr_store, mode='w', compute=False, encoding=encoding)  # type: ignore[call-overload]
 
         logger.info(f"Successfully initialized Zarr store at: gs://{GCS_BUCKET}/{ZARR_STORE_PATH}")
         context.submit_subtask(OrchestrateDataLoading(time_range=self.time_range))
@@ -145,10 +145,9 @@ class LoadYearData(Task):
 
         for i in range(len(datapoints.time)):
             dp = datapoints.isel(time=i)
-            # Convert numpy.datetime64 to python datetime, then to string
             dt64 = dp.time.values
             ts = (dt64 - np.datetime64('1970-01-01T00:00:00Z')) / np.timedelta64(1, 's')
-            timestamp = datetime.fromtimestamp(ts, tz=datetime.timezone.utc)
+            timestamp = datetime.fromtimestamp(ts, tz=timezone.utc)
 
             context.submit_subtask(LoadDekadIntoZarr(
                 asset_url=str(dp["asset_url"].values),
@@ -176,7 +175,6 @@ class LoadDekadIntoZarr(Task):
         start_time = datetime.fromisoformat(start_str)
         end_time = datetime.fromisoformat(end_str)
 
-        # This logic must exactly mirror InitializeZarrStore
         modis_start_time = max(start_time, datetime(2000, 1, 1))
         modis_end_time = min(end_time, datetime(2023, 1, 1))
         viirs_start_time = max(start_time, datetime(2023, 1, 1))
@@ -219,30 +217,23 @@ class LoadDekadIntoZarr(Task):
         if isinstance(data, list):
             data = data[0]
         
-        # The GeoTIFFs use specific values for no data, land, and water.
-        # We want to treat all of these as NaN.
-        # rioxarray.open_rasterio with masked=True should handle the _FillValue.
-        # We will manually mask the other values.
-        data = data.where(data != 251) # other land
-        data = data.where(data != 254) # water
+        data = data.where(data != 251)
+        data = data.where(data != 254)
         
-        # Remove conflicting attributes
         if "_FillValue" in data.attrs:
             del data.attrs["_FillValue"]
 
         data = data.squeeze('band', drop=True)
         ds = data.to_dataset(name="fpar").expand_dims("time")
         
-        # Drop non-time coordinates before writing to a region
         ds = ds.drop_vars(['x', 'y', 'spatial_ref'])
 
         ds.to_zarr(
-            zarr_store,  # type: ignore[arg-type]
+            zarr_store,
             region={"time": slice(time_index, time_index + 1)},
             mode="r+",
-            zarr_format=3,
             consolidated=False,
-        )
+        ) # type: ignore[call-overload]
         logger.info(f"Successfully loaded asset {self.asset_url} into time index {time_index}.")
 
 
