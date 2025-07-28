@@ -42,6 +42,12 @@ machine_type = infra_config.get("machine_type") or "e2-highmem-4"
 tilebox_config = pulumi.Config("tilebox")
 tilebox_api_key = tilebox_config.require_secret("api_key")
 
+# Get the Axiom credentials from Pulumi secrets
+axiom_config = pulumi.Config("axiom")
+axiom_api_key = axiom_config.require_secret("api_key")
+axiom_logs_dataset = axiom_config.require("logs_dataset")
+axiom_traces_dataset = axiom_config.require("traces_dataset")
+
 
 # --- API Enabler ---
 
@@ -154,6 +160,12 @@ instance_template = gcp.compute.InstanceTemplate("vci-runner-template",
             "    env:\n",
             "    - name: TILEBOX_API_KEY\n",
             "      value: '", tilebox_api_key, "'\n",
+            "    - name: AXIOM_API_KEY\n",
+            "      value: '", axiom_api_key, "'\n",
+            "    - name: AXIOM_LOGS_DATASET\n",
+            "      value: '", axiom_logs_dataset, "'\n",
+            "    - name: AXIOM_TRACES_DATASET\n",
+            "      value: '", axiom_traces_dataset, "'\n",
             "    stdin: false\n",
             "    tty: false\n",
             "  restartPolicy: Always\n"
@@ -223,7 +235,7 @@ autoscaler = gcp.compute.RegionAutoscaler("vci-runner-autoscaler",
         cooldown_period=60,
         mode=autoscaler_mode,
         cpu_utilization=gcp.compute.RegionAutoscalerAutoscalingPolicyCpuUtilizationArgs(
-            target=0.6,
+            target=0.3,
         ),
     ),
     opts=pulumi.ResourceOptions(depends_on=[mig]),
