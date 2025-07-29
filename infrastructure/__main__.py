@@ -36,7 +36,8 @@ gcp_region = gcp_config.require("region")
 infra_config = pulumi.Config("vci-infrastructure")
 cluster_enabled = infra_config.require_bool("cluster_enabled")
 min_replicas_config = infra_config.require_int("min_replicas")
-machine_type = infra_config.get("machine_type") or "e2-highmem-4"
+max_replicas_config = infra_config.get_int("max_replicas") or 10
+machine_type = infra_config.get("machine_type") or "e2-standard-2"
 
 # Get the Tilebox API key from Pulumi secrets
 tilebox_config = pulumi.Config("tilebox")
@@ -230,12 +231,12 @@ autoscaler = gcp.compute.RegionAutoscaler("vci-runner-autoscaler",
     target=mig.self_link,
     region=gcp_region,
     autoscaling_policy=gcp.compute.RegionAutoscalerAutoscalingPolicyArgs(
-        max_replicas=10,
+        max_replicas=max_replicas_config,
         min_replicas=min_replicas,
         cooldown_period=60,
         mode=autoscaler_mode,
         cpu_utilization=gcp.compute.RegionAutoscalerAutoscalingPolicyCpuUtilizationArgs(
-            target=0.3,
+            target=0.2,
         ),
     ),
     opts=pulumi.ResourceOptions(depends_on=[mig]),
