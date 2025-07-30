@@ -1,14 +1,18 @@
-import pulumi
-import pulumi_gcp as gcp
-import pulumi_command as command
-import os
 import hashlib
+import os
+
+import pulumi
+import pulumi_command as command
+import pulumi_gcp as gcp
 
 # --- Helper Function ---
+
 
 def hash_directory(path):
     """
     Computes a stable SHA256 hash of a directory's contents.
+    This is used to generate a unique, content-based tag for the Docker image.
+    The build is only triggered if this hash changes.
     """
     hasher = hashlib.sha256()
     for root, _, files in os.walk(path):
@@ -24,6 +28,7 @@ def hash_directory(path):
                         break
                     hasher.update(chunk)
     return hasher.hexdigest()
+
 
 # --- Configuration ---
 
@@ -52,9 +57,12 @@ axiom_traces_dataset = axiom_config.require("traces_dataset")
 
 # --- API Enabler ---
 
-# Enable necessary GCP services
+# Enable necessary GCP services declaratively. This makes the Pulumi program
+# self-contained and ensures that it can be run on a fresh GCP project.
 compute_api = gcp.projects.Service("compute-api", service="compute.googleapis.com")
-artifact_registry_api = gcp.projects.Service("artifact-registry-api", service="artifactregistry.googleapis.com")
+artifact_registry_api = gcp.projects.Service(
+    "artifact-registry-api", service="artifactregistry.googleapis.com"
+)
 iam_api = gcp.projects.Service("iam-api", service="iam.googleapis.com")
 storage_api = gcp.projects.Service("storage-api", service="storage.googleapis.com")
 cloud_build_api = gcp.projects.Service("cloud-build-api", service="cloudbuild.googleapis.com")
@@ -63,7 +71,8 @@ cloud_build_api = gcp.projects.Service("cloud-build-api", service="cloudbuild.go
 # --- Resources ---
 
 # Create an Artifact Registry repository to store our Docker images
-repository = gcp.artifactregistry.Repository("vci-repository",
+repository = gcp.artifactregistry.Repository(
+    "vci-repository",
     location=gcp_region,
     repository_id="vci-runners",
     format="DOCKER",
@@ -71,72 +80,90 @@ repository = gcp.artifactregistry.Repository("vci-repository",
     opts=pulumi.ResourceOptions(depends_on=[artifact_registry_api]),
 )
 
-# Create a dedicated service account for the runner instances
-runner_sa = gcp.serviceaccount.Account("vci-runner-sa",
+# Create a dedicated service account for the runner instances to follow the
+# principle of least privilege.
+runner_sa = gcp.serviceaccount.Account(
+    "vci-runner-sa",
     account_id="vci-runner-sa",
     display_name="VCI Workflow Runner Service Account",
     opts=pulumi.ResourceOptions(depends_on=[iam_api]),
 )
 
-# Grant the service account the necessary roles
-gcp.projects.IAMMember("vci-runner-sa-storage-admin",
+# Grant the service account only the specific roles it needs.
+gcp.projects.IAMMember(
+    "vci-runner-sa-storage-admin",
     project=gcp_project,
     role="roles/storage.objectAdmin",
     member=pulumi.Output.concat("serviceAccount:", runner_sa.email),
     opts=pulumi.ResourceOptions(depends_on=[runner_sa]),
 )
-gcp.projects.IAMMember("vci-runner-sa-artifact-reader",
+gcp.projects.IAMMember(
+    "vci-runner-sa-artifact-reader",
     project=gcp_project,
     role="roles/artifactregistry.reader",
     member=pulumi.Output.concat("serviceAccount:", runner_sa.email),
     opts=pulumi.ResourceOptions(depends_on=[runner_sa]),
 )
-gcp.projects.IAMMember("vci-runner-sa-log-writer",
+gcp.projects.IAMMember(
+    "vci-runner-sa-log-writer",
     project=gcp_project,
     role="roles/logging.logWriter",
+    member=pulumi.Output.concat("serviceAccount:", runner_sa.email),
+    opts=pulumi.ResourceOptions(depends_on=[runner_sa]),
+)
+gcp.projects.IAMMember(
+    "vci-runner-sa-metric-writer",
+    project=gcp_project,
+    role="roles/monitoring.metricWriter",
     member=pulumi.Output.concat("serviceAccount:", runner_sa.email),
     opts=pulumi.ResourceOptions(depends_on=[runner_sa]),
 )
 
 # --- Cloud Build ---
 
-# Calculate the hash of the workflow code to use as an immutable image tag
+# Calculate the hash of the workflow code to use as an immutable image tag.
 workflow_dir = os.path.join(os.path.dirname(__file__), "../workflow")
 code_hash = hash_directory(workflow_dir)
 
-# Define the base image name
-base_image_name = pulumi.Output.concat(
-    "eu.gcr.io/",
-    gcp_project,
-    "/vci-runners/workflow-runner"
-)
-# Define the fully-qualified image name with the code hash as the tag
+# Use the gcr.io domain for multi-regional pushes. Artifact Registry creates
+# a gcr.io repository wrapper automatically for backward compatibility.
+base_image_name = pulumi.Output.concat("eu.gcr.io/", gcp_project, "/vci-runners/workflow-runner")
 image_name_with_tag = pulumi.Output.concat(base_image_name, ":", code_hash)
 
 # Use a Command resource to trigger Google Cloud Build.
-cloud_build = command.local.Command("cloud-build-image",
+cloud_build = command.local.Command(
+    "cloud-build-image",
     create=pulumi.Output.concat(
         "gcloud builds submit ",
         workflow_dir,
-        " --tag=", image_name_with_tag,
-        " --project=", gcp_project
+        " --config=",
+        os.path.join(workflow_dir, "cloudbuild.yaml"),
+        " --substitutions=_CODE_HASH=",
+        code_hash,
+        " --project=",
+        gcp_project,
     ),
+    # The 'triggers' property ensures this command re-runs when the code changes.
     triggers=[code_hash],
     opts=pulumi.ResourceOptions(depends_on=[cloud_build_api, repository]),
 )
 
 # --- Networking ---
 
-# Create a Cloud Router
-router = gcp.compute.Router("vci-router",
+# Create a Cloud Router, which is a prerequisite for Cloud NAT.
+router = gcp.compute.Router(
+    "vci-router",
     name="vci-router",
     network="default",
     region=gcp_region,
     opts=pulumi.ResourceOptions(depends_on=[compute_api]),
 )
 
-# Create a Cloud NAT gateway to allow outbound internet access
-nat = gcp.compute.RouterNat("vci-nat",
+# Create a Cloud NAT gateway. This allows the VMs to make outbound connections
+# (e.g., to pull Docker images) without having public IP addresses, which is a
+# critical security best practice.
+nat = gcp.compute.RouterNat(
+    "vci-nat",
     name="vci-nat",
     router=router.name,
     region=gcp_region,
@@ -149,7 +176,8 @@ nat = gcp.compute.RouterNat("vci-nat",
 # --- Compute ---
 
 # Define the Instance Template for the MIG
-instance_template = gcp.compute.InstanceTemplate("vci-runner-template",
+instance_template = gcp.compute.InstanceTemplate(
+    "vci-runner-template",
     machine_type=machine_type,
     tags=["vci-runner"],
     metadata={
@@ -157,33 +185,47 @@ instance_template = gcp.compute.InstanceTemplate("vci-runner-template",
             "spec:\n",
             "  containers:\n",
             "  - name: vci-workflow-runner\n",
-            "    image: '", image_name_with_tag, "'\n",
+            "    image: '",
+            image_name_with_tag,
+            "'\n",
             "    env:\n",
             "    - name: TILEBOX_API_KEY\n",
-            "      value: '", tilebox_api_key, "'\n",
+            "      value: '",
+            tilebox_api_key,
+            "'\n",
             "    - name: AXIOM_API_KEY\n",
-            "      value: '", axiom_api_key, "'\n",
+            "      value: '",
+            axiom_api_key,
+            "'\n",
             "    - name: AXIOM_LOGS_DATASET\n",
-            "      value: '", axiom_logs_dataset, "'\n",
+            "      value: '",
+            axiom_logs_dataset,
+            "'\n",
             "    - name: AXIOM_TRACES_DATASET\n",
-            "      value: '", axiom_traces_dataset, "'\n",
+            "      value: '",
+            axiom_traces_dataset,
+            "'\n",
             "    stdin: false\n",
             "    tty: false\n",
-            "  restartPolicy: Always\n"
-        )
+            "  restartPolicy: Always\n",
+        ),
+        # This is the correct metadata key to enable the Ops Agent for monitoring
+        # (including memory) on Container-Optimized OS.
+        "google-monitoring-enabled": "true",
     },
-    disks=[gcp.compute.InstanceTemplateDiskArgs(
-        source_image="cos-cloud/cos-stable",
-        auto_delete=True,
-        boot=True,
-    )],
-    network_interfaces=[gcp.compute.InstanceTemplateNetworkInterfaceArgs(
-        network="default",
-    )],
+    disks=[
+        gcp.compute.InstanceTemplateDiskArgs(
+            source_image="cos-cloud/cos-stable",
+            auto_delete=True,
+            boot=True,
+        )
+    ],
+    network_interfaces=[gcp.compute.InstanceTemplateNetworkInterfaceArgs(network="default")],
     service_account=gcp.compute.InstanceTemplateServiceAccountArgs(
         email=runner_sa.email,
         scopes=["https://www.googleapis.com/auth/cloud-platform"],
     ),
+    # Use Spot VMs for cost savings. The API requires these specific scheduling options.
     scheduling=gcp.compute.InstanceTemplateSchedulingArgs(
         provisioning_model="SPOT",
         preemptible=True,
@@ -193,48 +235,53 @@ instance_template = gcp.compute.InstanceTemplate("vci-runner-template",
     opts=pulumi.ResourceOptions(depends_on=[compute_api, runner_sa, cloud_build]),
 )
 
-# --- Cluster On/Off Logic ---
-
-if cluster_enabled:
-    # If the cluster is enabled, the autoscaler is ON and controls the size.
-    # The MIG's target_size is not set, ceding control to the autoscaler.
-    autoscaler_mode = "ON"
-    min_replicas = min_replicas_config
-    mig_target_size = None # Omit target_size to let autoscaler manage it
-else:
-    # If the cluster is disabled, the autoscaler is turned OFF.
-    # The MIG's target_size is explicitly set to 0.
-    autoscaler_mode = "OFF"
-    min_replicas = 0
-    mig_target_size = 0
 
 # Define the Managed Instance Group
-mig = gcp.compute.RegionInstanceGroupManager("vci-runner-mig",
+mig = gcp.compute.RegionInstanceGroupManager(
+    "vci-runner-mig",
     base_instance_name="vci-runner",
     region=gcp_region,
-    versions=[gcp.compute.RegionInstanceGroupManagerVersionArgs(
-        instance_template=instance_template.self_link,
-        name="primary",
-    )],
-    target_size=mig_target_size,
+    versions=[
+        gcp.compute.RegionInstanceGroupManagerVersionArgs(
+            instance_template=instance_template.self_link,
+            name="primary",
+        )
+    ],
     update_policy=gcp.compute.RegionInstanceGroupManagerUpdatePolicyArgs(
         type="PROACTIVE",
         minimal_action="REPLACE",
+        # For a regional MIG, maxSurge must be at least the number of zones.
         max_surge_fixed=3,
         max_unavailable_fixed=0,
     ),
     opts=pulumi.ResourceOptions(depends_on=[instance_template]),
 )
 
+# --- Cluster On/Off Logic ---
+
+if cluster_enabled:
+    # If the cluster is enabled, the autoscaler is ON and controls the size.
+    # The MIG's target_size is not set, ceding control to the autoscaler,
+    # which will scale up to min_replicas immediately.
+    min_replicas = min_replicas_config
+    max_replicas = max_replicas_config
+else:
+    # If the cluster is disabled, the autoscaler is turned OFF.
+    # The MIG's target_size is explicitly set to 0 to shut down all instances.
+    min_replicas = 0
+    max_replicas = 0
+
+
 # Define the Autoscaler for the MIG
-autoscaler = gcp.compute.RegionAutoscaler("vci-runner-autoscaler",
+autoscaler = gcp.compute.RegionAutoscaler(
+    "vci-runner-autoscaler",
     target=mig.self_link,
     region=gcp_region,
     autoscaling_policy=gcp.compute.RegionAutoscalerAutoscalingPolicyArgs(
-        max_replicas=max_replicas_config,
+        max_replicas=max_replicas,
         min_replicas=min_replicas,
         cooldown_period=60,
-        mode=autoscaler_mode,
+        mode="ON",
         cpu_utilization=gcp.compute.RegionAutoscalerAutoscalingPolicyCpuUtilizationArgs(
             target=0.2,
         ),
@@ -243,7 +290,8 @@ autoscaler = gcp.compute.RegionAutoscaler("vci-runner-autoscaler",
 )
 
 # Create a GCS bucket to store the Zarr datacube
-bucket = gcp.storage.Bucket("vci-datacube-bucket",
+bucket = gcp.storage.Bucket(
+    "vci-datacube-bucket",
     location=gcp_region,
     project=gcp_project,
     uniform_bucket_level_access=True,
@@ -251,14 +299,16 @@ bucket = gcp.storage.Bucket("vci-datacube-bucket",
     versioning=gcp.storage.BucketVersioningArgs(
         enabled=False,
     ),
-    lifecycle_rules=[gcp.storage.BucketLifecycleRuleArgs(
-        action=gcp.storage.BucketLifecycleRuleActionArgs(
-            type="Delete",
-        ),
-        condition=gcp.storage.BucketLifecycleRuleConditionArgs(
-            age=30,
-        ),
-    )],
+    lifecycle_rules=[
+        gcp.storage.BucketLifecycleRuleArgs(
+            action=gcp.storage.BucketLifecycleRuleActionArgs(
+                type="Delete",
+            ),
+            condition=gcp.storage.BucketLifecycleRuleConditionArgs(
+                age=30,  # Automatically delete objects older than 30 days
+            ),
+        )
+    ],
     opts=pulumi.ResourceOptions(depends_on=[storage_api]),
 )
 
