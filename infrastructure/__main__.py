@@ -65,7 +65,9 @@ artifact_registry_api = gcp.projects.Service(
 )
 iam_api = gcp.projects.Service("iam-api", service="iam.googleapis.com")
 storage_api = gcp.projects.Service("storage-api", service="storage.googleapis.com")
-cloud_build_api = gcp.projects.Service("cloud-build-api", service="cloudbuild.googleapis.com")
+cloud_build_api = gcp.projects.Service(
+    "cloud-build-api", service="cloudbuild.googleapis.com"
+)
 
 
 # --- Resources ---
@@ -127,7 +129,9 @@ code_hash = hash_directory(workflow_dir)
 
 # Use the gcr.io domain for multi-regional pushes. Artifact Registry creates
 # a gcr.io repository wrapper automatically for backward compatibility.
-base_image_name = pulumi.Output.concat("eu.gcr.io/", gcp_project, "/vci-runners/workflow-runner")
+base_image_name = pulumi.Output.concat(
+    "eu.gcr.io/", gcp_project, "/vci-runners/workflow-runner"
+)
 image_name_with_tag = pulumi.Output.concat(base_image_name, ":", code_hash)
 
 # Use a Command resource to trigger Google Cloud Build.
@@ -220,7 +224,9 @@ instance_template = gcp.compute.InstanceTemplate(
             boot=True,
         )
     ],
-    network_interfaces=[gcp.compute.InstanceTemplateNetworkInterfaceArgs(network="default")],
+    network_interfaces=[
+        gcp.compute.InstanceTemplateNetworkInterfaceArgs(network="default")
+    ],
     service_account=gcp.compute.InstanceTemplateServiceAccountArgs(
         email=runner_sa.email,
         scopes=["https://www.googleapis.com/auth/cloud-platform"],

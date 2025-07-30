@@ -3,7 +3,7 @@ config:
   gcp:region: europe-west4
   tilebox:api_key:
     secure: AAABADskD7fdt7FOSApXJCZIQCpzuZYGoXFAucnXB9+A8xbdrVk+haEnuRirkMoWK1ZhihJbJarRX2oWBZAufUkIwVbX7rN8NPnFmmw70/IsuRZ6Jlx/q7Q=
-  vci-infrastructure:cluster_enabled: "true"
+  vci-infrastructure:cluster_enabled: true
   vci-infrastructure:min_replicas: "1"
   vci-infrastructure:machine_type: e2-standard-4
   axiom:api_key:
