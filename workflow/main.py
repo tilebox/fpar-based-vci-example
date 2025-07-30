@@ -1,53 +1,71 @@
 import os
-from datetime import datetime, timedelta, timezone
 import socket
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
-import dask.array
 import numpy as np
+import rasterio  # type: ignore[import-untyped]
 import xarray as xr
-import rasterio
-from obstore.store import HTTPStore
+import zarr
 from obstore.auth.google import GoogleCredentialProvider
-from obstore.store import GCSStore
+from obstore.store import GCSStore, HTTPStore
 from tilebox.datasets import Client as DatasetsClient  # type: ignore[import-untyped]
-from tilebox.workflows import Task, ExecutionContext, Client as WorkflowsClient  # type: ignore[import-untyped]
-from tilebox.workflows.observability.logging import configure_console_logging, get_logger  # type: ignore[import-untyped]
+from tilebox.workflows import Client as WorkflowsClient  # type: ignore[import-untyped]
+from tilebox.workflows import ExecutionContext, Task
+from tilebox.workflows.observability.logging import (  # type: ignore[import-untyped]
+    configure_console_logging,
+    get_logger,
+)
 from zarr.codecs import BloscCodec
 from zarr.storage import ObjectStore as ZarrObjectStore
 
-# --- Constants ---
-GCS_BUCKET = "vci-datacube-bucket-1513742"
-ZARR_STORE_PATH = "vci_fpar.zarr"
-DATASET_ID = "tilebox.modis_fpar"
-MODIS_COLLECTION = "MODIS"
-VIIRS_COLLECTION = "VIIRS"
-FILL_VALUE = 255
-
-# --- Configuration ---
-WIDTH = 80640
-HEIGHT = 29346
-TIME_CHUNK = 1
-HEIGHT_CHUNK = 8192
-WIDTH_CHUNK = 8192
-COMPRESSOR = BloscCodec(cname="lz4hc", clevel=5, shuffle="shuffle")
+from config import (
+    COMPRESSOR,
+    DATASET_ID,
+    FILL_VALUE,
+    GCS_BUCKET,
+    HEIGHT,
+    HEIGHT_CHUNK,
+    MODIS_COLLECTION,
+    TIME_CHUNK,
+    VIIRS_COLLECTION,
+    WIDTH,
+    WIDTH_CHUNK,
+    ZARR_STORE_PATH,
+)
+from minmax import InitializeMinMaxArrays
 
 
 def _find_closest_datapoint(dataset, time: datetime) -> xr.Dataset:
+    """
+    Finds the first available data point in the dataset after a given time.
+    This is used to determine the precise start and end dekads for the workflow.
+    """
     collection = VIIRS_COLLECTION
-    if time < datetime(2023, 1, 1):  # modis cutoff
+    if time < datetime(2023, 1, 1):  # MODIS/VIIRS cutoff
         collection = MODIS_COLLECTION
+    # Query a small window to find the next available dekad
     data = dataset.collection(collection).query(
         temporal_extent=(time - timedelta(days=1), time + timedelta(days=15)),
-        skip_data=False, show_progress=False,
+        skip_data=False,
+        show_progress=False,
     )
     return data.isel(time=0)
+
+
+def _calc_time_index(year: int, dekad: int, start_year: int, start_dekad: int) -> int:
+    """
+    Calculates a global, zero-based time index for a given year and dekad
+    relative to a starting year and dekad. Assumes 36 dekads per year.
+    """
+    return (year - start_year) * 36 + (dekad - start_dekad)
 
 
 class InitializeZarrStore(Task):
     """
     Initializes a Zarr store on GCS to hold the consolidated FPAR datacube.
     """
+
     time_range: str
 
     def execute(self, context: ExecutionContext) -> None:
@@ -63,41 +81,55 @@ class InitializeZarrStore(Task):
         start_datapoint = _find_closest_datapoint(dataset, start_time)
         end_datapoint = _find_closest_datapoint(dataset, end_time)
 
-        logger.info(start_datapoint)
         start_year_dekad = (start_datapoint["year"].item(), start_datapoint["dekad"].item())
         end_year_dekad = (end_datapoint["year"].item(), end_datapoint["dekad"].item())
 
-        num_dekads = _calc_time_index(end_year_dekad[0], end_year_dekad[1], start_year_dekad[0], start_year_dekad[1]) + 1
+        num_dekads = (
+            _calc_time_index(
+                end_year_dekad[0], end_year_dekad[1], start_year_dekad[0], start_year_dekad[1]
+            )
+            + 1
+        )
         logger.info(f"Found {num_dekads} assets for the given time range.")
 
         shape = (num_dekads, HEIGHT, WIDTH)
         chunks = (TIME_CHUNK, HEIGHT_CHUNK, WIDTH_CHUNK)
 
+        # Use a job-specific path to prevent concurrent jobs from interfering.
         zarr_prefix = f"{ZARR_STORE_PATH}/{context.current_task.job.id}/cube.zarr"  # type: ignore[attr-defined]
-        object_store = GCSStore(bucket=GCS_BUCKET, prefix=zarr_prefix, credential_provider=GoogleCredentialProvider())
+        object_store = GCSStore(
+            bucket=GCS_BUCKET, prefix=zarr_prefix, credential_provider=GoogleCredentialProvider()
+        )
         zarr_store = ZarrObjectStore(object_store)
 
-        coords = {"time": np.arange(num_dekads), "y": np.arange(HEIGHT), "x": np.arange(WIDTH)}
-        dims = ("time", "y", "x")
+        # Initialize the Zarr group and arrays directly. This is more memory-efficient
+        # than creating a large in-memory xarray/dask object and writing it.
+        root = zarr.group(store=zarr_store, overwrite=True)
+        root.create_array(
+            "fpar",
+            shape=shape,
+            chunks=chunks,
+            dimension_names=["time", "y", "x"],
+            dtype="u1",
+            compressors=COMPRESSOR,
+            fill_value=FILL_VALUE,
+        )
 
-        dummy_data = dask.array.zeros(
-                shape,
-                chunks=chunks,
-                dtype=np.uint8,
-            )
-        ds = xr.Dataset({"fpar": (dims, dummy_data)}, coords=coords)
-        # TODO directly use zarr here to initialize the store, not xarray or dask or numpy
-        encoding = {"fpar": {"compressors": tuple([COMPRESSOR]), "chunks": chunks, "_FillValue": FILL_VALUE}}
-        ds.to_zarr(zarr_store, mode='w', compute=False, encoding=encoding, consolidated=False, zarr_format=3)  # type: ignore[call-overload]
-        
-        logger.info(f"Successfully initialized Zarr store at: gs://{GCS_BUCKET}/{ZARR_STORE_PATH}")
-        context.submit_subtask(OrchestrateDataLoading(time_range=self.time_range, start_year_dekad=start_year_dekad))
+        logger.info(f"Successfully initialized Zarr store at: gs://{GCS_BUCKET}/{zarr_prefix}")
+        data_loading_task = context.submit_subtask(
+            OrchestrateDataLoading(time_range=self.time_range, start_year_dekad=start_year_dekad)
+        )
+
+        # Chain the min/max calculation to run after all data loading is complete.
+        context.submit_subtask(InitializeMinMaxArrays(), depends_on=[data_loading_task])
+
 
 
 class OrchestrateDataLoading(Task):
     """
     Submits a subtask for each year in the time range.
     """
+
     time_range: str
     start_year_dekad: tuple[int, int]
 
@@ -109,7 +141,11 @@ class OrchestrateDataLoading(Task):
         end_year = datetime.fromisoformat(end_str).year
 
         for year in range(start_year, end_year + 1):
-            context.submit_subtask(LoadYearData(year=year, time_range=self.time_range, start_year_dekad=self.start_year_dekad))
+            context.submit_subtask(
+                LoadYearData(
+                    year=year, time_range=self.time_range, start_year_dekad=self.start_year_dekad
+                )
+            )
         logger.info(f"Submitted tasks for years {start_year} to {end_year}.")
 
 
@@ -117,6 +153,7 @@ class LoadYearData(Task):
     """
     Queries for a single year and submits subtasks for each dekad in that year.
     """
+
     year: int
     time_range: str
     start_year_dekad: tuple[int, int]
@@ -142,8 +179,10 @@ class LoadYearData(Task):
             return
 
         collection_name = MODIS_COLLECTION if self.year <= 2022 else VIIRS_COLLECTION
-        
-        logger.info(f"Querying {collection_name} for year {self.year} in range {query_start_time} to {query_end_time}")
+
+        logger.info(
+            f"Querying {collection_name} for year {self.year} in range {query_start_time} to {query_end_time}"
+        )
         datapoints = dataset.collection(collection_name).query(
             temporal_extent=(query_start_time, query_end_time),
             show_progress=False,
@@ -151,33 +190,22 @@ class LoadYearData(Task):
 
         for i in range(len(datapoints.time)):
             dp = datapoints.isel(time=i)
-
-            context.submit_subtask(LoadDekadIntoZarr(
-                asset_url=str(dp["asset_url"].item()),
-                year=int(dp["year"].item()),
-                dekad=int(dp["dekad"].item()),
-                start_year_dekad=self.start_year_dekad,
-            ))
+            context.submit_subtask(
+                LoadDekadIntoZarr(
+                    asset_url=str(dp["asset_url"].item()),
+                    year=int(dp["year"].item()),
+                    dekad=int(dp["dekad"].item()),
+                    start_year_dekad=self.start_year_dekad,
+                )
+            )
         logger.info(f"Submitted {len(datapoints.time)} subtasks for year {self.year}.")
 
-
-def _calc_time_index(year: int, dekad: int, start_year: int, start_dekad: int) -> int:
-    return (year - start_year) * 36 + (dekad - start_dekad)
-
-def _tests():
-    assert _calc_time_index(2010, 20, 2010, 20) == 0
-    assert _calc_time_index(2010, 21, 2010, 20) == 1
-    assert _calc_time_index(2010, 22, 2010, 20) == 2
-    assert _calc_time_index(2010, 35, 2010, 20) == 15
-    assert _calc_time_index(2010, 36, 2010, 20) == 16
-    assert _calc_time_index(2011, 1, 2010, 20) == 17
-    assert _calc_time_index(2012, 1, 2010, 20) == 17 + 36
-    assert _calc_time_index(2013, 1, 2010, 20) == 17 + 36 + 36
 
 class LoadDekadIntoZarr(Task):
     """
     Loads a single dekad's GeoTIFF into the correct time slice of the Zarr datacube.
     """
+
     asset_url: str
     year: int
     dekad: int
@@ -187,61 +215,84 @@ class LoadDekadIntoZarr(Task):
         time_index = _calc_time_index(self.year, self.dekad, *self.start_year_dekad)
         logger = get_logger()
         if time_index < 0:
-            logger.error(f"Invalid time index for {self.asset_url} for year {self.year} and dekad {self.dekad}")
+            logger.error(
+                f"Invalid time index for {self.asset_url} for year {self.year} and dekad {self.dekad}"
+            )
             return
 
-        logger.info(f"Loading asset {self.asset_url} into time index {time_index} ({self.year}-{self.dekad})...")
+        logger.info(
+            f"Loading asset {self.asset_url} into time index {time_index} ({self.year}-{self.dekad})..."
+        )
 
-        # Download the file into an in-memory buffer
+        # 1. Download the file into an in-memory buffer first.
+        # This is significantly faster than streaming directly from the URL with rioxarray,
+        # as it avoids multiple HTTP range requests.
         parsed_url = urlparse(self.asset_url)
         base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
         store = HTTPStore.from_url(base_url)
-        file_name = parsed_url.path.lstrip('/')
+        file_name = parsed_url.path.lstrip("/")
         obj = store.get(file_name)
+        buffer = memoryview(obj.bytes())
 
-        tracer = context._runner.tracer._tracer  # type: ignore[arg-defined], # noqa: SLF001
-        with tracer.start_span(f"{file_name}/download"):
-            buffer = memoryview(obj.bytes())
+        # 2. Open the in-memory buffer and process with NumPy.
+        with rasterio.MemoryFile(buffer) as memfile:
+            with memfile.open() as product:
+                # Read the data. rasterio returns a 3D array (band, y, x).
+                arr = product.read()
+                # Manually replace flagged no-data values (251, 254) with the standard fill value.
+                arr = np.where((arr == 251) | (arr == 254), FILL_VALUE, arr)
+                # Select the first band to get a 2D array for writing.
+                processed_arr = arr[0, :, :]
 
-        # Open the in-memory buffer with rioxarray
-        with tracer.start_span(f"{file_name}/read"):
-            with rasterio.MemoryFile(buffer) as memfile:
-                with memfile.open() as product:
-                    arr = product.read()
+        # 3. Write the 2D array to the correct Zarr slice.
+        # Using zarr directly for writing is more explicit and avoids the overhead
+        # of creating an xarray object just for the write operation.
+        zarr_prefix = f"{ZARR_STORE_PATH}/{context.current_task.job.id}/cube.zarr"  # type: ignore[attr-defined]
+        object_store = GCSStore(
+            bucket=GCS_BUCKET, prefix=zarr_prefix, credential_provider=GoogleCredentialProvider()
+        )
+        zarr_store = ZarrObjectStore(object_store)
+        root = zarr.open_group(store=zarr_store, mode="r+")
+        fpar_array = root["fpar"]
+        # Use standard NumPy-style slicing, which is highly efficient.
+        # mypy struggles with this dynamic assignment, so we ignore the type error.
+        fpar_array[time_index, :, :] = processed_arr  # type: ignore[index]
 
-            # Manually replace flagged no-data values with the standard fill value
-            arr = np.where((arr == 251) | (arr == 254), FILL_VALUE, arr)
-            ds = xr.Dataset({
-                "fpar": (["time", "y", "x"], arr)
-            })
-
-        # Write to Zarr store
-        with tracer.start_span(f"{file_name}/write"):
-            zarr_prefix = f"{ZARR_STORE_PATH}/{context.current_task.job.id}/cube.zarr"  # type: ignore[attr-defined]
-            object_store = GCSStore(bucket=GCS_BUCKET, prefix=zarr_prefix, credential_provider=GoogleCredentialProvider())
-            zarr_store = ZarrObjectStore(object_store)
-            # TODO explore using zarr directly instead of xarray (so we have implicit region mapping etc)
-            ds.to_zarr(
-                zarr_store,
-                region={"time": slice(time_index, time_index + 1)},
-                mode="r+",
-                consolidated=False,
-            ) # type: ignore[call-overload]
-            logger.info(f"Successfully loaded asset {self.asset_url} into time index {time_index}.")
+        logger.info(f"Successfully loaded asset {self.asset_url} into time index {time_index}.")
 
 
 if __name__ == "__main__":
-    from tilebox.workflows.observability.logging import configure_console_logging, configure_otel_logging_axiom
-    from tilebox.workflows.observability.tracing import configure_otel_tracing_axiom
+    from minmax import (
+        CalculateChunkMinMax,
+        InitializeMinMaxArrays,
+        OrchestrateMinMaxCalculation,
+    )
+    from tilebox.workflows.observability.logging import (
+        configure_console_logging,
+        configure_otel_logging_axiom,
+    )
+    from tilebox.workflows.observability.tracing import (  # type: ignore[import-untyped]
+        configure_otel_tracing_axiom,
+    )
 
     # Configure logging backends
     configure_console_logging()
     configure_otel_logging_axiom(f"{socket.gethostname()}-{os.getpid()}")
 
-    # # Configure tracing backends
+    # Configure tracing backends
     configure_otel_tracing_axiom(f"{socket.gethostname()}-{os.getpid()}")
 
     # Start the runner
     client = WorkflowsClient()
-    runner = client.runner(tasks=[InitializeZarrStore, OrchestrateDataLoading, LoadYearData, LoadDekadIntoZarr])
+    runner = client.runner(
+        tasks=[
+            InitializeZarrStore,
+            OrchestrateDataLoading,
+            LoadYearData,
+            LoadDekadIntoZarr,
+            InitializeMinMaxArrays,
+            OrchestrateMinMaxCalculation,
+            CalculateChunkMinMax,
+        ]
+    )
     runner.run_forever()

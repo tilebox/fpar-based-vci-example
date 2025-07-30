@@ -1,0 +1,36 @@
+steps:
+  # 1. Pull the cached image (if it exists) to use its layers for caching.
+  # We allow this step to fail in case this is the very first build.
+  - name: 'gcr.io/cloud-builders/docker'
+    entrypoint: 'bash'
+    args: ['-c', 'docker pull eu.gcr.io/$PROJECT_ID/vci-runners/workflow-runner:latest || exit 0']
+
+  # 2. Build the new image, using the pulled image as a cache source.
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'eu.gcr.io/$PROJECT_ID/vci-runners/workflow-runner:${_CODE_HASH}'
+      - '--cache-from'
+      - 'eu.gcr.io/$PROJECT_ID/vci-runners/workflow-runner:latest'
+      - '.'
+
+  # 3. Push the newly tagged, immutable image.
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'eu.gcr.io/$PROJECT_ID/vci-runners/workflow-runner:${_CODE_HASH}']
+
+  # 4. Re-tag the new image as 'latest' to speed up the *next* build.
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'tag'
+      - 'eu.gcr.io/$PROJECT_ID/vci-runners/workflow-runner:${_CODE_HASH}'
+      - 'eu.gcr.io/$PROJECT_ID/vci-runners/workflow-runner:latest'
+
+  # 5. Push the 'latest' tag.
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'eu.gcr.io/$PROJECT_ID/vci-runners/workflow-runner:latest']
+
+# Tell Cloud Build which images to push to the registry upon completion.
+images:
+  - 'eu.gcr.io/$PROJECT_ID/vci-runners/workflow-runner:${_CODE_HASH}'
+  - 'eu.gcr.io/$PROJECT_ID/vci-runners/workflow-runner:latest'
