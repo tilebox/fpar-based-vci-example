@@ -6,6 +6,7 @@ config:
   vci-infrastructure:cluster_enabled: true
   vci-infrastructure:min_replicas: "1"
   vci-infrastructure:machine_type: e2-standard-4
+  vci-infrastructure:tilebox_cluster: default-4ma8yzxLnSM1uF
   axiom:api_key:
     secure: AAABAGTJHxFCydAqyq+mdQyDQRNY88AqIBqJdpn4trkc+xgUtX8cAAY8CzsMrqeQtRoaxZ/v7ZjFuIGk3ovDwC7adQQxCffykA==
   axiom:logs_dataset: workflow-logs

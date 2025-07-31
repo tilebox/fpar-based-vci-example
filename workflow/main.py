@@ -311,6 +311,14 @@ if __name__ == "__main__":
         InitializeVciArray,
         OrchestrateVciByYear,
     )
+    from vci_visualization import (
+        CreateVciGif,
+        CreateVciFramesByYear,
+        CreateVciFramesForYear,
+        CreateSingleVciFrame,
+        CreateGifFromFrames,
+        DownloadGifFromCache,
+    )
 
     # Configure logging backends
     configure_console_logging()
@@ -323,6 +331,9 @@ if __name__ == "__main__":
     storage_client = StorageClient()
     gcs_bucket = storage_client.bucket(GCS_BUCKET)
     cache = GoogleStorageCache(gcs_bucket, prefix="vci_workflow_cache")
+
+    # Get cluster configuration from environment variable
+    cluster = os.environ.get("TILEBOX_CLUSTER", None)
 
     # Start the runner
     client = WorkflowsClient()
@@ -340,7 +351,16 @@ if __name__ == "__main__":
             CalculateVciForYear,
             CalculateVciDekad,
             CalculateVciChunk,
+            CreateVciGif,
+            CreateVciFramesByYear,
+            CreateVciFramesForYear,
+            CreateSingleVciFrame,
+            CreateGifFromFrames,
+            DownloadGifFromCache,
         ],
         cache=cache,
+        cluster=cluster,
     )
+
+    print(f"Starting runner on cluster: {cluster}")
     runner.run_forever()

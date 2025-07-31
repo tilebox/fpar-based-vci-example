@@ -43,6 +43,7 @@ cluster_enabled = infra_config.require_bool("cluster_enabled")
 min_replicas_config = infra_config.require_int("min_replicas")
 max_replicas_config = infra_config.get_int("max_replicas") or 10
 machine_type = infra_config.get("machine_type") or "e2-standard-2"
+tilebox_cluster = infra_config.get("tilebox_cluster")
 
 # Get the Tilebox API key from Pulumi secrets
 tilebox_config = pulumi.Config("tilebox")
@@ -208,6 +209,10 @@ instance_template = gcp.compute.InstanceTemplate(
             "    - name: AXIOM_TRACES_DATASET\n",
             "      value: '",
             axiom_traces_dataset,
+            "'\n",
+            "    - name: TILEBOX_CLUSTER\n",
+            "      value: '",
+            tilebox_cluster,
             "'\n",
             "    stdin: false\n",
             "    tty: false\n",

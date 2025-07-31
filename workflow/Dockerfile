@@ -4,8 +4,11 @@ FROM python:3.13-slim
 # Set the working directory
 WORKDIR /app
 
-# Install system dependencies required by rasterio
-RUN apt-get update && apt-get install -y libexpat1 && rm -rf /var/lib/apt/lists/*
+# Install system dependencies required by rasterio and ffmpeg for GIF creation
+RUN apt-get update && apt-get install -y \
+    libexpat1 \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
 
 # Install uv
 RUN pip install uv
