@@ -107,8 +107,8 @@ class CalculateChunkMinMax(Task):
 
         # Use xarray's built-in, optimized methods to calculate min/max along the time dimension.
         # skipna=True correctly handles the _FillValue. The result is a 2D DataArray.
-        min_values = chunk_selection.min(dim="time", skipna=True).astype("u1")
-        max_values = chunk_selection.max(dim="time", skipna=True).astype("u1")
+        min_values = chunk_selection.where(chunk_selection != FILL_VALUE).min(dim="time", skipna=True).astype("u1")
+        max_values = chunk_selection.where(chunk_selection != FILL_VALUE).max(dim="time", skipna=True).astype("u1")
 
         root = zarr.open_group(store=zarr_store, mode="r+", use_consolidated=False)
         min_array = root["min_fpar"]    
