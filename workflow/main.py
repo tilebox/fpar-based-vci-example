@@ -56,8 +56,6 @@ def _find_closest_datapoint(dataset, time: datetime) -> xr.Dataset:
     return data.isel(time=0)
 
 
-
-
 class InitializeZarrStore(Task):
     """
     Initializes a Zarr store on GCS to hold the consolidated FPAR datacube.
@@ -78,14 +76,18 @@ class InitializeZarrStore(Task):
         start_datapoint = _find_closest_datapoint(dataset, start_time)
         end_datapoint = _find_closest_datapoint(dataset, end_time)
 
-        start_year_dekad = (start_datapoint["year"].item(), start_datapoint["dekad"].item())
+        start_year_dekad = (
+            start_datapoint["year"].item(),
+            start_datapoint["dekad"].item(),
+        )
         end_year_dekad = (end_datapoint["year"].item(), end_datapoint["dekad"].item())
-
-        
 
         num_dekads = (
             _calc_time_index(
-                end_year_dekad[0], end_year_dekad[1], start_year_dekad[0], start_year_dekad[1]
+                end_year_dekad[0],
+                end_year_dekad[1],
+                start_year_dekad[0],
+                start_year_dekad[1],
             )
             + 1
         )
@@ -100,7 +102,9 @@ class InitializeZarrStore(Task):
         # Use a job-specific path to prevent concurrent jobs from interfering.
         zarr_prefix = f"{ZARR_STORE_PATH}/{context.current_task.job.id}/cube.zarr"  # type: ignore[attr-defined]
         object_store = GCSStore(
-            bucket=GCS_BUCKET, prefix=zarr_prefix, credential_provider=GoogleCredentialProvider()
+            bucket=GCS_BUCKET,
+            prefix=zarr_prefix,
+            credential_provider=GoogleCredentialProvider(),
         )
         zarr_store = ZarrObjectStore(object_store)
 
@@ -123,17 +127,22 @@ class InitializeZarrStore(Task):
             {"start": start_year_dekad, "end": end_year_dekad}
         )
 
-        logger.info(f"Successfully initialized Zarr store at: gs://{GCS_BUCKET}/{zarr_prefix}")
+        logger.info(
+            f"Successfully initialized Zarr store at: gs://{GCS_BUCKET}/{zarr_prefix}"
+        )
         data_loading_task = context.submit_subtask(
-            OrchestrateDataLoading(time_range=self.time_range, start_year_dekad=start_year_dekad)
+            OrchestrateDataLoading(
+                time_range=self.time_range, start_year_dekad=start_year_dekad
+            )
         )
 
         # Chain the min/max calculation to run after all data loading is complete.
-        min_max_task = context.submit_subtask(InitializeMinMaxArrays(), depends_on=[data_loading_task])
+        min_max_task = context.submit_subtask(
+            InitializeMinMaxArrays(), depends_on=[data_loading_task]
+        )
 
         # Chain the VCI calculation to run after the min/max calculation is complete.
         context.submit_subtask(InitializeVciArray(), depends_on=[min_max_task])
-
 
 
 class OrchestrateDataLoading(Task):
@@ -154,7 +163,9 @@ class OrchestrateDataLoading(Task):
         for year in range(start_year, end_year + 1):
             context.submit_subtask(
                 LoadYearData(
-                    year=year, time_range=self.time_range, start_year_dekad=self.start_year_dekad
+                    year=year,
+                    time_range=self.time_range,
+                    start_year_dekad=self.start_year_dekad,
                 )
             )
         logger.info(f"Submitted tasks for years {start_year} to {end_year}.")
@@ -186,7 +197,9 @@ class LoadYearData(Task):
         query_end_time = min(workflow_end_time, year_end_time)
 
         if query_start_time >= query_end_time:
-            logger.info(f"No data to load for year {self.year} within the given time range.")
+            logger.info(
+                f"No data to load for year {self.year} within the given time range."
+            )
             return
 
         collection_name = MODIS_COLLECTION if self.year <= 2022 else VIIRS_COLLECTION
@@ -260,7 +273,9 @@ class LoadDekadIntoZarr(Task):
         # of creating an xarray object just for the write operation.
         zarr_prefix = f"{ZARR_STORE_PATH}/{context.current_task.job.id}/cube.zarr"  # type: ignore[attr-defined]
         object_store = GCSStore(
-            bucket=GCS_BUCKET, prefix=zarr_prefix, credential_provider=GoogleCredentialProvider()
+            bucket=GCS_BUCKET,
+            prefix=zarr_prefix,
+            credential_provider=GoogleCredentialProvider(),
         )
         zarr_store = ZarrObjectStore(object_store)
         root = zarr.open_group(store=zarr_store, mode="r+")
@@ -269,7 +284,9 @@ class LoadDekadIntoZarr(Task):
         # mypy struggles with this dynamic assignment, so we ignore the type error.
         fpar_array[time_index, :, :] = processed_arr  # type: ignore[index]
 
-        logger.info(f"Successfully loaded asset {self.asset_url} into time index {time_index}.")
+        logger.info(
+            f"Successfully loaded asset {self.asset_url} into time index {time_index}."
+        )
 
 
 if __name__ == "__main__":
@@ -289,8 +306,10 @@ if __name__ == "__main__":
     )
     from vci import (
         CalculateVciChunk,
+        CalculateVciDekad,
+        CalculateVciForYear,
         InitializeVciArray,
-        OrchestrateVciCalculation,
+        OrchestrateVciByYear,
     )
 
     # Configure logging backends
@@ -317,7 +336,9 @@ if __name__ == "__main__":
             OrchestrateMinMaxCalculation,
             CalculateChunkMinMax,
             InitializeVciArray,
-            OrchestrateVciCalculation,
+            OrchestrateVciByYear,
+            CalculateVciForYear,
+            CalculateVciDekad,
             CalculateVciChunk,
         ],
         cache=cache,
