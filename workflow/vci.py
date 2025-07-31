@@ -1,4 +1,3 @@
-import config
 import pickle
 import numpy as np
 import xarray as xr
@@ -13,8 +12,11 @@ from config import (
     COMPRESSOR,
     FILL_VALUE,
     GCS_BUCKET,
+    HEIGHT,
+    HEIGHT_CHUNK,
+    WIDTH,
+    WIDTH_CHUNK,
     ZARR_STORE_PATH,
-    _calc_time_index,
 )
 
 
@@ -25,6 +27,9 @@ class InitializeVciArray(Task):
     """
 
     def execute(self, context: ExecutionContext) -> None:
+        logger = get_logger()
+        logger.info("Initializing VCI array...")
+
         zarr_prefix = f"{ZARR_STORE_PATH}/{context.current_task.job.id}/cube.zarr"
         object_store = GCSStore(
             bucket=GCS_BUCKET, prefix=zarr_prefix, credential_provider=GoogleCredentialProvider()
@@ -55,95 +60,85 @@ class InitializeVciArray(Task):
         )
         # vci_array.attrs["_ARRAY_DIMENSIONS"] = ["time", "y", "x"]
         # vci_array.attrs["_FillValue"] = np.nan
-        context.submit_subtask(OrchestrateVciByYear())
+
+        logger.info("Successfully initialized VCI array.")
+        context.submit_subtask(OrchestrateVciCalculation())
 
 
-
-class OrchestrateVciByYear(Task):
+class OrchestrateVciCalculation(Task):
     """
-    Retrieves the overall time range from the cache and submits a subtask for each year.
+    Submits a subtask for each spatial chunk in the datacube.
+    This creates a parallel map-reduce job across the spatial domain for the VCI calculation.
     """
 
     def execute(self, context: ExecutionContext) -> None:
-        dekad_range = pickle.loads(context.job_cache["dekad_range"])
-        if not dekad_range:
-            return
+        logger = get_logger()
+        logger.info("Orchestrating VCI calculation by chunk...")
 
-        start_year = dekad_range["start"][0]
-        end_year = dekad_range["end"][0]
+        num_y_chunks = (HEIGHT + HEIGHT_CHUNK - 1) // HEIGHT_CHUNK
+        num_x_chunks = (WIDTH + WIDTH_CHUNK - 1) // WIDTH_CHUNK
 
-        for year in range(start_year, end_year + 1):
-            context.submit_subtask(CalculateVciForYear(year=year))
+        for y_idx in range(num_y_chunks):
+            for x_idx in range(num_x_chunks):
+                context.submit_subtask(CalculateVciChunk(y_idx=y_idx, x_idx=x_idx))
+
+        logger.info(f"Submitted {num_y_chunks * num_x_chunks} VCI chunk processing tasks.")
 
 
-class CalculateVciForYear(Task):
+class CalculateVciChunk(Task):
     """
-    Submits a subtask for each dekad within a given year.
-    """
-
-    year: int
-
-    def execute(self, context: ExecutionContext) -> None:
-        dekad_range = pickle.loads(context.job_cache["dekad_range"])
-        if not dekad_range:
-            return
-
-        start_year_dekad = dekad_range["start"]
-        end_year_dekad = dekad_range["end"]
-
-        # Determine the dekad range for the current year
-        start_dekad = 1
-        if self.year == start_year_dekad[0]:
-            start_dekad = start_year_dekad[1]
-
-        end_dekad = 36
-        if self.year == end_year_dekad[0]:
-            end_dekad = end_year_dekad[1]
-
-        for dekad in range(start_dekad, end_dekad + 1):
-            time_index = _calc_time_index(self.year, dekad, *start_year_dekad)
-            if time_index >= 0:
-                context.submit_subtask(CalculateVciDekad(time_index=time_index))
-
-
-class CalculateVciDekad(Task):
-    """
-    Calculates the VCI for a single time slice (dekad).
+    Calculates the VCI for a single spatial chunk across all time slices.
     VCI = (FPAR - FPAR_min) / (FPAR_max - FPAR_min)
     """
 
-    time_index: int
+    y_idx: int
+    x_idx: int
 
     def execute(self, context: ExecutionContext) -> None:
+        logger = get_logger()
+        logger.info(f"Calculating VCI for chunk ({self.y_idx}, {self.x_idx})...")
+
         zarr_prefix = f"{ZARR_STORE_PATH}/{context.current_task.job.id}/cube.zarr"
         object_store = GCSStore(
             bucket=GCS_BUCKET, prefix=zarr_prefix, credential_provider=GoogleCredentialProvider()
         )
-        zarr_store = ZarrObjectStore(object_store)  # type: ignore[arg-type]
+        zarr_store = ZarrObjectStore(object_store)
 
         ds = xr.open_zarr(zarr_store)
 
-        fpar = ds["fpar"].isel(time=self.time_index)
-        fpar_min = ds["min_fpar"]
-        fpar_max = ds["max_fpar"]
+        y_start = self.y_idx * HEIGHT_CHUNK
+        y_end = min((self.y_idx + 1) * HEIGHT_CHUNK, HEIGHT)
+        x_start = self.x_idx * WIDTH_CHUNK
+        x_end = min((self.x_idx + 1) * WIDTH_CHUNK, WIDTH)
+
+        fpar_chunk = ds["fpar"][:, y_start:y_end, x_start:x_end]
+        fpar_min_chunk = ds["min_fpar"][y_start:y_end, x_start:x_end]
+        fpar_max_chunk = ds["max_fpar"][y_start:y_end, x_start:x_end]
 
         # Ensure we are working with floats for the calculation
-        fpar = fpar.astype("f4")
-        fpar_min = fpar_min.astype("f4")
-        fpar_max = fpar_max.astype("f4")
+        fpar_chunk = fpar_chunk.astype("f4")
+        fpar_min_chunk = fpar_min_chunk.astype("f4")
+        fpar_max_chunk = fpar_max_chunk.astype("f4")
 
         # Replace the fill value with NaN to ensure correct calculations
-        fpar = fpar.where(fpar != FILL_VALUE)
-        fpar_min = fpar_min.where(fpar_min != FILL_VALUE)
-        fpar_max = fpar_max.where(fpar_max != FILL_VALUE)
+        fpar_chunk = fpar_chunk.where(fpar_chunk != FILL_VALUE)
+        fpar_min_chunk = fpar_min_chunk.where(fpar_min_chunk != FILL_VALUE)
+        fpar_max_chunk = fpar_max_chunk.where(fpar_max_chunk != FILL_VALUE)
 
-        fpar_range = fpar_max - fpar_min
+        fpar_range = fpar_max_chunk - fpar_min_chunk
         # Use .where to avoid division by zero, placing NaN where the range is zero.
-        vci = ((fpar - fpar_min) / fpar_range).where(fpar_range > 0)
-        vci = vci.astype("f4")
-        vci.name = "vci"
+        vci_chunk = ((fpar_chunk - fpar_min_chunk) / fpar_range).where(fpar_range > 0)
+        vci_chunk = vci_chunk.astype("f4")
 
-        root = zarr.open_group(store=zarr_store, mode="r+", use_consolidated=False)
-        vci_array = root["vci"]    
+        # Open the Zarr group directly for writing.
+        root = zarr.open_group(store=zarr_store, mode="r+")
+        vci_array = root["vci"]
 
-        vci_array[self.time_index, :, :] = vci.values  # type: ignore[index]
+        # Define the region to write to using NumPy-style slicing.
+        region = (slice(None), slice(y_start, y_end), slice(x_start, x_end))
+
+        # Assign the computed VCI values to the corresponding chunk in the Zarr array.
+        # mypy struggles with this dynamic assignment, so we ignore the type error.
+        vci_array[region] = vci_chunk.values  # type: ignore[index]
+
+        logger.info(f"Successfully calculated and wrote VCI for chunk ({self.y_idx}, {self.x_idx}).")

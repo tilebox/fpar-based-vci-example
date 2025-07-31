@@ -288,10 +288,9 @@ if __name__ == "__main__":
         configure_otel_tracing_axiom,
     )
     from vci import (
-        CalculateVciDekad,
-        CalculateVciForYear,
+        CalculateVciChunk,
         InitializeVciArray,
-        OrchestrateVciByYear,
+        OrchestrateVciCalculation,
     )
 
     # Configure logging backends
@@ -318,9 +317,8 @@ if __name__ == "__main__":
             OrchestrateMinMaxCalculation,
             CalculateChunkMinMax,
             InitializeVciArray,
-            OrchestrateVciByYear,
-            CalculateVciForYear,
-            CalculateVciDekad,
+            OrchestrateVciCalculation,
+            CalculateVciChunk,
         ],
         cache=cache,
     )
