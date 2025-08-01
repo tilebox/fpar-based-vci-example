@@ -1,3 +1,4 @@
+from functools import lru_cache
 import os
 import pickle
 import subprocess
@@ -23,17 +24,50 @@ from config import (
 )
 
 
-def get_font(size: int = 24) -> Any:
+@lru_cache
+def assets_store() -> GCSStore:
+    return GCSStore(
+        bucket=GCS_BUCKET,
+        prefix="assets",
+        credential_provider=GoogleCredentialProvider(),
+    )
+
+
+@lru_cache
+def get_font(size: int = 24, style="Regular") -> Any:
     """Get a font for text rendering with system-specific fallbacks."""
+    local = Path(f"Poppins-{style}.ttf")
+    if not local.exists():
+        assets_store = GCSStore(
+            bucket=GCS_BUCKET,
+            prefix="assets",
+            credential_provider=GoogleCredentialProvider(),
+        )
+        with local.open("wb") as f:
+            f.write(memoryview(assets_store.get(str(local)).bytes()))
+
     try:
-        return ImageFont.truetype("/System/Library/Fonts/Arial.ttf", size)
+        return ImageFont.truetype(str(local.absolute()), size)
     except OSError:
-        try:
-            return ImageFont.truetype(
-                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", size
-            )
-        except OSError:
-            return ImageFont.load_default()
+        return ImageFont.load_default(size)
+
+
+@lru_cache
+def get_logo(scale: float = 0.7) -> Any:
+    """Get a font for text rendering with system-specific fallbacks."""
+    local = Path("tilebox-logo.png")
+    if not local.exists():
+        assets_store = GCSStore(
+            bucket=GCS_BUCKET,
+            prefix="assets",
+            credential_provider=GoogleCredentialProvider(),
+        )
+        with local.open("wb") as f:
+            f.write(memoryview(assets_store.get(str(local)).bytes()))
+
+    logo = Image.open(str(local))
+    logo = logo.resize((int(logo.size[0] * scale), int(logo.size[1] * scale)))
+    return logo
 
 
 class CreateVciVideo(Task):
@@ -225,56 +259,58 @@ class CreateSingleVciFrame(Task):
         img_array[nan_mask, :3] = 255
         img_array[nan_mask, 3] = 255
 
-        final_image = Image.fromarray(img_array[:, :, :3])
+        final_image = Image.fromarray(img_array)
         width, height = final_image.size
 
-        logo_path = Path(__file__).parent / "tilebox-symbol-color@2x.png"
-        if logo_path.exists():
-            try:
-                with Image.open(logo_path) as logo_img:
-                    # Make logo larger - 6% of image width instead of 3.33%
-                    logo_width = int(width * 0.06)
-                    logo_height = int(logo_img.height * logo_width / logo_img.width)
-                    logo_resized = logo_img.resize(
-                        (logo_width, logo_height), Image.Resampling.LANCZOS
-                    )
-
-                    logo_x = width - logo_width - 10
-                    logo_y = 10
-                    final_image.paste(
-                        logo_resized,
-                        (logo_x, logo_y),
-                        logo_resized if logo_resized.mode == "RGBA" else None,
-                    )
-            except Exception as e:
-                logger = get_logger()
-                logger.warning(f"Could not add logo: {e}")
+        try:
+            logo = get_logo(scale=0.6)
+            # paste the logo into the bottom right corner
+            logo_padding = 80
+            final_image.alpha_composite(
+                logo, (logo_padding, height - logo.height - logo_padding)
+            )
+        except Exception as e:
+            logger = get_logger()
+            logger.warning(f"Could not add logo: {e}")
 
         year, dekad = _calc_year_dekad_from_time_index(time_idx, *start_year_dekad)
-        text = f"{year} D{dekad:02d}"
 
-        draw = ImageDraw.Draw(final_image)
-        font = get_font(48)
+        def _draw_centered_text(text: str, y_from_bottom: int, font: Any):
+            draw = ImageDraw.Draw(final_image)
+            bbox = draw.textbbox((0, 0), text, font=font)
+            text_width = bbox[2] - bbox[0]
+            text_height = bbox[3] - bbox[1]
 
-        bbox = draw.textbbox((0, 0), text, font=font)
-        text_width = bbox[2] - bbox[0]
-        text_height = bbox[3] - bbox[1]
+            text_x = width // 2 - text_width // 2
+            text_y = height - text_height - y_from_bottom
 
-        padding = 8
-        text_x = padding
-        text_y = height - text_height - padding
+            bg_padding = 5
+            bg_bbox = [
+                text_x - bg_padding,
+                text_y - bg_padding,
+                text_x + text_width + bg_padding,
+                text_y + text_height + bg_padding,
+            ]
+            draw.rectangle(bg_bbox, fill=(255, 255, 255, 200))
+            draw.text((text_x, text_y), text, fill=(0, 0, 0), font=font)
 
-        bg_padding = 5
-        bg_bbox = [
-            text_x - bg_padding,
-            text_y - bg_padding,
-            text_x + text_width + bg_padding,
-            text_y + text_height + bg_padding,
-        ]
-        draw.rectangle(bg_bbox, fill=(255, 255, 255, 200))
-        draw.text((text_x, text_y), text, fill=(0, 0, 0), font=font)
+        _draw_centered_text(
+            f"{year} D{dekad:02d}", y_from_bottom=60, font=get_font(40, "Bold")
+        )
+        _draw_centered_text(
+            "Vegetation Condition Index",
+            y_from_bottom=180,
+            font=get_font(32, "Regular"),
+        )
+        _draw_centered_text(
+            "derived from MODIS FPAR dataset",
+            y_from_bottom=140,
+            font=get_font(32, "Regular"),
+        )
 
         frame_filename = f"vci_frame_{time_idx:04d}.png"
+
+        final_image = final_image.convert("RGB")  # remove alpha channel
 
         from io import BytesIO
 
