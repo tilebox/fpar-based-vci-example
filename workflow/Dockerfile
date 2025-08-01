@@ -1,25 +1,32 @@
-# Use the official Python 3.13 slim image as a base
-FROM python:3.13-slim
+# Multi-stage build for better caching and smaller final image
+FROM python:3.13-slim as base
 
-# Set the working directory
-WORKDIR /app
-
-# Install system dependencies required by rasterio and ffmpeg for GIF creation
+# Install system dependencies in a separate layer for better caching
 RUN apt-get update && apt-get install -y \
     libexpat1 \
     ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
-# Install uv
-RUN pip install uv
+# Install uv in base layer
+RUN pip install --no-cache-dir uv
 
-# Copy only the dependency files first
-COPY pyproject.toml uv.lock* ./
+# Dependencies stage - this will be cached unless dependencies change
+FROM base as deps
+WORKDIR /app
 
-# Install dependencies. This layer is only rebuilt if the dependency files change.
-RUN uv sync
+# Copy only dependency files for maximum cache efficiency
+COPY pyproject.toml uv.lock ./
 
-# Copy the rest of the workflow code. This layer is rebuilt on every code change.
+# Install dependencies with uv cache for faster rebuilds
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev
+
+# Final stage - copy code and set up runtime
+FROM deps as runtime
+WORKDIR /app
+
+# Copy application code (this layer rebuilds on code changes)
 COPY . .
 
 # Set the command to run the task runner

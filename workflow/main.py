@@ -312,12 +312,12 @@ if __name__ == "__main__":
         OrchestrateVciByYear,
     )
     from vci_visualization import (
-        CreateVciGif,
+        CreateVciVideo,
         CreateVciFramesByYear,
         CreateVciFramesForYear,
         CreateSingleVciFrame,
-        CreateGifFromFrames,
-        DownloadGifFromCache,
+        CreateVideoFromFrames,
+        DownloadVideoFromCache,
     )
 
     # Configure logging backends
@@ -351,12 +351,12 @@ if __name__ == "__main__":
             CalculateVciForYear,
             CalculateVciDekad,
             CalculateVciChunk,
-            CreateVciGif,
+            CreateVciVideo,
             CreateVciFramesByYear,
             CreateVciFramesForYear,
             CreateSingleVciFrame,
-            CreateGifFromFrames,
-            DownloadGifFromCache,
+            CreateVideoFromFrames,
+            DownloadVideoFromCache,
         ],
         cache=cache,
         cluster=cluster,
