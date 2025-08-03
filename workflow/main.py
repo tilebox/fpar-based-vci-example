@@ -1,7 +1,7 @@
 import os
 import pickle
 import socket
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from urllib.parse import urlparse
 
 import numpy as np
@@ -17,26 +17,29 @@ from tilebox.workflows.observability.logging import (  # type: ignore[import-unt
     configure_console_logging,
     get_logger,
 )
-from zarr.codecs import BloscCodec
 from zarr.storage import ObjectStore as ZarrObjectStore
 
 from config import (
     COMPRESSOR,
     DATASET_ID,
+    DATA_SEARCH_POST_DAYS,
+    DATA_SEARCH_PRE_DAYS,
     FILL_VALUE,
+    FPAR_NO_DATA_VALUES,
     GCS_BUCKET,
     HEIGHT,
     HEIGHT_CHUNK,
     MODIS_COLLECTION,
     TIME_CHUNK,
     VIIRS_COLLECTION,
+    VIIRS_START_DATE,
     WIDTH,
     WIDTH_CHUNK,
-    ZARR_STORE_PATH,
     _calc_time_index,
 )
 from minmax import InitializeMinMaxArrays
 from vci import InitializeVciArray
+from zarr_helper import get_job_zarr_prefix
 
 
 def _find_closest_datapoint(dataset, time: datetime) -> xr.Dataset:
@@ -45,11 +48,14 @@ def _find_closest_datapoint(dataset, time: datetime) -> xr.Dataset:
     This is used to determine the precise start and end dekads for the workflow.
     """
     collection = VIIRS_COLLECTION
-    if time < datetime(2023, 1, 1):  # MODIS/VIIRS cutoff
+    if time < VIIRS_START_DATE:
         collection = MODIS_COLLECTION
-    # Query a small window to find the next available dekad
+    # Query a small window around the target time to find the next available dekad.
     data = dataset.collection(collection).query(
-        temporal_extent=(time - timedelta(days=1), time + timedelta(days=15)),
+        temporal_extent=(
+            time - timedelta(days=DATA_SEARCH_PRE_DAYS),
+            time + timedelta(days=DATA_SEARCH_POST_DAYS),
+        ),
         skip_data=False,
         show_progress=False,
     )
@@ -98,9 +104,12 @@ class InitializeZarrStore(Task):
         context.job_cache["num_dekads"] = pickle.dumps(num_dekads)
         context.job_cache["shape"] = pickle.dumps(shape)
         context.job_cache["chunks"] = pickle.dumps(chunks)
+        logger.info(f"Num dekads: {num_dekads}")
+        logger.info(f"Shape: {shape}")
+        logger.info(f"Chunks: {chunks}")
 
         # Use a job-specific path to prevent concurrent jobs from interfering.
-        zarr_prefix = f"{ZARR_STORE_PATH}/{context.current_task.job.id}/cube.zarr"  # type: ignore[attr-defined]
+        zarr_prefix = get_job_zarr_prefix(context.current_task.job.id)  # type: ignore[attr-defined]
         object_store = GCSStore(
             bucket=GCS_BUCKET,
             prefix=zarr_prefix,
@@ -122,10 +131,11 @@ class InitializeZarrStore(Task):
         )
 
         # Save the start and end dekads to the cache for the VCI calculation tasks.
-        # The cache is automatically scoped to the job, so we can use a simple key.
         context.job_cache["dekad_range"] = pickle.dumps(
             {"start": start_year_dekad, "end": end_year_dekad}
         )
+        dekad_range = {'start': start_year_dekad, 'end': end_year_dekad}
+        logger.info(f"dekad_range: {dekad_range}")
 
         logger.info(
             f"Successfully initialized Zarr store at: gs://{GCS_BUCKET}/{zarr_prefix}"
@@ -263,15 +273,15 @@ class LoadDekadIntoZarr(Task):
             with memfile.open() as product:
                 # Read the data. rasterio returns a 3D array (band, y, x).
                 arr = product.read()
-                # Manually replace flagged no-data values (251, 254) with the standard fill value.
-                arr = np.where((arr == 251) | (arr == 254), FILL_VALUE, arr)
+                # Manually replace flagged no-data values with the standard fill value.
+                arr = np.where(np.isin(arr, FPAR_NO_DATA_VALUES), FILL_VALUE, arr)
                 # Select the first band to get a 2D array for writing.
                 processed_arr = arr[0, :, :]
 
         # 3. Write the 2D array to the correct Zarr slice.
         # Using zarr directly for writing is more explicit and avoids the overhead
         # of creating an xarray object just for the write operation.
-        zarr_prefix = f"{ZARR_STORE_PATH}/{context.current_task.job.id}/cube.zarr"  # type: ignore[attr-defined]
+        zarr_prefix = get_job_zarr_prefix(context.current_task.job.id)  # type: ignore[attr-defined]
         object_store = GCSStore(
             bucket=GCS_BUCKET,
             prefix=zarr_prefix,
@@ -290,13 +300,18 @@ class LoadDekadIntoZarr(Task):
 
 
 if __name__ == "__main__":
+    import os
+    import socket
+
     from google.cloud.storage import Client as StorageClient  # type: ignore[import-untyped]
+    from tilebox.workflows.cache import GoogleStorageCache  # type: ignore[import-untyped]
+
     from minmax import (
+        CalculateDekadChunkMinMax,
         CalculateChunkMinMax,
         InitializeMinMaxArrays,
         OrchestrateMinMaxCalculation,
     )
-    from tilebox.workflows.cache import GoogleStorageCache  # type: ignore[import-untyped]
     from tilebox.workflows.observability.logging import (
         configure_console_logging,
         configure_otel_logging_axiom,
@@ -312,11 +327,11 @@ if __name__ == "__main__":
         OrchestrateVciByYear,
     )
     from vci_visualization import (
-        CreateVciVideo,
         CreateVciFramesByYear,
         CreateVciFramesForYear,
         CreateSingleVciFrame,
         CreateVideoFromFrames,
+        CreateVciVideo,
         DownloadVideoFromCache,
     )
 
@@ -345,6 +360,7 @@ if __name__ == "__main__":
             LoadDekadIntoZarr,
             InitializeMinMaxArrays,
             OrchestrateMinMaxCalculation,
+            CalculateDekadChunkMinMax,
             CalculateChunkMinMax,
             InitializeVciArray,
             OrchestrateVciByYear,

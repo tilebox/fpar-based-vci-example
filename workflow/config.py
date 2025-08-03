@@ -1,10 +1,19 @@
+from datetime import datetime
+
 # --- Constants ---
 GCS_BUCKET = "vci-datacube-bucket-1513742"
 ZARR_STORE_PATH = "vci_fpar.zarr"
 DATASET_ID = "tilebox.modis_fpar"
 MODIS_COLLECTION = "MODIS"
 VIIRS_COLLECTION = "VIIRS"
+VIIRS_START_DATE = datetime(2023, 1, 1)
 FILL_VALUE = 255
+FPAR_NO_DATA_VALUES = (251, 254)  # Specific no-data values from source GeoTIFFs
+START_YEAR_DEKAD = (2000, 15)
+
+# --- Data Search Window ---
+DATA_SEARCH_PRE_DAYS = 1
+DATA_SEARCH_POST_DAYS = 15
 
 # --- Configuration ---
 WIDTH = 80640
@@ -15,6 +24,8 @@ WIDTH_CHUNK = 8192
 
 from zarr.codecs import BloscCodec
 COMPRESSOR = BloscCodec(cname="lz4hc", clevel=5, shuffle="shuffle")
+
+
 
 
 def _calc_time_index(year: int, dekad: int, start_year: int, start_dekad: int) -> int:
@@ -55,3 +66,25 @@ def _calc_year_dekad_from_time_index(time_index: int, start_year: int, start_dek
     year = start_year + year_offset
 
     return year, dekad
+
+
+def _calc_dekad_from_date(dt: datetime) -> tuple[int, int]:
+    """
+    Calculates the year and dekad from a datetime object based on a 36-dekad year model.
+
+    A dekad is a 10-day period, with 3 dekads per month.
+    - Days 1-10: Dekad 1
+    - Days 11-20: Dekad 2
+    - Days 21+: Dekad 3
+
+    Args:
+        dt: The datetime object.
+
+    Returns:
+        A tuple of (year, dekad).
+    """
+    year = dt.year
+    # Approximate dekad: 3 per month.
+    dekad = ((dt.month - 1) * 3) + ((dt.day - 1) // 10) + 1
+    # Clamp to 1-36 range, as this model assumes 36 dekads per year.
+    return year, max(1, min(36, dekad))

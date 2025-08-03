@@ -1,3 +1,6 @@
 .DS_Store
 infrastructure/__pycache__
 workflow/__pycache__
+workflow/fpar_animation.mp4
+workflow/mt0017FPRCF.tif
+workflow/vci_animation.mp4
