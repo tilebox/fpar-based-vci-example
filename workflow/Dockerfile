@@ -30,4 +30,4 @@ WORKDIR /app
 COPY . .
 
 # Set the command to run the task runner
-CMD ["uv", "run", "--", "python", "main.py"]
+CMD ["uv", "run", "--", "python", "runner.py"]

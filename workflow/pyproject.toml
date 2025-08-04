@@ -24,4 +24,6 @@ dependencies = [
 [dependency-groups]
 dev = [
     "mypy>=1.17.0",
+    "pylyzer>=0.0.82",
+    "ruff>=0.12.7",
 ]

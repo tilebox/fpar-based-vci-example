@@ -1,10 +1,12 @@
+from dataclasses import dataclass
+import math
+from typing import Iterator
 import numpy as np
-import xarray as xr
 import zarr
 from obstore.auth.google import GoogleCredentialProvider
 from obstore.store import GCSStore
-from tilebox.workflows import ExecutionContext, Task  # type: ignore[import-untyped]
-from tilebox.workflows.observability.logging import get_logger  # type: ignore[import-untyped]
+from tilebox.workflows import ExecutionContext, Task
+from tilebox.workflows.observability.logging import get_logger
 from zarr.storage import ObjectStore as ZarrObjectStore
 
 from config import (
@@ -14,8 +16,29 @@ from config import (
     HEIGHT_CHUNK,
     WIDTH,
     WIDTH_CHUNK,
-    ZARR_STORE_PATH,
 )
+
+
+class ComputeMinMaxPerDekad(Task):
+    """
+    Computes the min and max FPAR values for each dekad and stores them in the Zarr store.
+    """
+
+    fpar_zarr_path: str
+    min_max_zarr_path: str
+
+    def execute(self, context: ExecutionContext) -> None:
+        logger = get_logger()
+        init_minmax = context.submit_subtask(
+            InitializeMinMaxArrays(min_max_zarr_path=self.min_max_zarr_path)
+        )
+        context.submit_subtask(
+            OrchestrateDekadMinMaxCalculation(
+                fpar_zarr_path=self.fpar_zarr_path,
+                min_max_zarr_path=self.min_max_zarr_path,
+            ),
+            depends_on=[init_minmax],
+        )
 
 
 class InitializeMinMaxArrays(Task):
@@ -24,98 +47,217 @@ class InitializeMinMaxArrays(Task):
     This task is chained to run after the main data ingestion is complete.
     """
 
+    min_max_zarr_path: str
+
     def execute(self, context: ExecutionContext) -> None:
         logger = get_logger()
         logger.info("Initializing min/max FPAR arrays...")
 
-        zarr_prefix = f"{ZARR_STORE_PATH}/{context.current_task.job.id}/cube.zarr"  # type: ignore[attr-defined]
         object_store = GCSStore(
-            bucket=GCS_BUCKET, prefix=zarr_prefix, credential_provider=GoogleCredentialProvider()
+            bucket=GCS_BUCKET,
+            prefix=self.min_max_zarr_path,
+            credential_provider=GoogleCredentialProvider(),
         )
         zarr_store = ZarrObjectStore(object_store)
-        root = zarr.group(store=zarr_store, overwrite=False)
 
-        shape = (HEIGHT, WIDTH)
-        chunks = (HEIGHT_CHUNK, WIDTH_CHUNK)
+        shape = (36, HEIGHT, WIDTH)
+        chunks = (36, HEIGHT_CHUNK, WIDTH_CHUNK)
 
-        # Create min_fpar array, initialized to the max possible uint8 value.
-        # The fill_value argument is the most efficient way to initialize an array.
-        min_fpar = root.create_array(
-            "min_fpar", shape=shape, chunks=chunks, dtype="u1", overwrite=True, fill_value=FILL_VALUE, dimension_names=["y", "x"],
+        zarr.create_array(
+            store=zarr_store,
+            name="min_fpar",
+            shape=shape,
+            chunks=chunks,
+            dtype=np.uint8,
+            overwrite=True,
+            fill_value=FILL_VALUE,
+            dimension_names=["dekad", "y", "x"],
         )
-        min_fpar.attrs["_FillValue"] = FILL_VALUE
 
-        # Create max_fpar array, initialized to zero.
-        max_fpar = root.create_array(
-            "max_fpar", shape=shape, chunks=chunks, dtype="u1", overwrite=True, fill_value=0, dimension_names=["y", "x"],
+        zarr.create_array(
+            store=zarr_store,
+            name="max_fpar",
+            shape=shape,
+            chunks=chunks,
+            dtype=np.uint8,
+            overwrite=True,
+            fill_value=FILL_VALUE,
+            dimension_names=["dekad", "y", "x"],
         )
-        max_fpar.attrs["_FillValue"] = FILL_VALUE
 
         logger.info("Successfully initialized min/max arrays.")
-        context.submit_subtask(OrchestrateMinMaxCalculation())
 
 
-class OrchestrateMinMaxCalculation(Task):
+class OrchestrateDekadMinMaxCalculation(Task):
     """
-    Submits a subtask for each spatial chunk in the datacube.
-    This creates a parallel map-reduce job across the spatial domain.
+    Submits a subtask for each of the 36 dekads of the year.
     """
+
+    fpar_zarr_path: str
+    min_max_zarr_path: str
 
     def execute(self, context: ExecutionContext) -> None:
         logger = get_logger()
-        logger.info("Orchestrating min/max calculation by chunk...")
+        logger.info("Orchestrating min/max calculation by dekad...")
 
-        num_y_chunks = (HEIGHT + HEIGHT_CHUNK - 1) // HEIGHT_CHUNK
-        num_x_chunks = (WIDTH + WIDTH_CHUNK - 1) // WIDTH_CHUNK
-
-        for y_idx in range(num_y_chunks):
-            for x_idx in range(num_x_chunks):
-                context.submit_subtask(CalculateChunkMinMax(y_idx=y_idx, x_idx=x_idx))
-
-        logger.info(f"Submitted {num_y_chunks * num_x_chunks} chunk processing tasks.")
-
-
-class CalculateChunkMinMax(Task):
-    """
-    Calculates the min and max for a single spatial chunk across the time dimension.
-    """
-
-    y_idx: int
-    x_idx: int
-
-    def execute(self, context: ExecutionContext) -> None:
-        logger = get_logger()
-        logger.info(f"Calculating min/max for chunk ({self.y_idx}, {self.x_idx})...")
-
-        zarr_prefix = f"{ZARR_STORE_PATH}/{context.current_task.job.id}/cube.zarr"  # type: ignore[attr-defined]
         object_store = GCSStore(
-            bucket=GCS_BUCKET, prefix=zarr_prefix, credential_provider=GoogleCredentialProvider()
+            bucket=GCS_BUCKET,
+            prefix=self.fpar_zarr_path,
+            credential_provider=GoogleCredentialProvider(),
         )
         zarr_store = ZarrObjectStore(object_store)
+        dekad_array = zarr.open_group(zarr_store, mode="r")["dekad"]
 
-        # Open the entire dataset with xarray. Dask lazy-loads the data, so this is efficient.
-        ds = xr.open_zarr(zarr_store, consolidated=False)
-        fpar_array = ds["fpar"]
 
-        y_start = self.y_idx * HEIGHT_CHUNK
-        y_end = min((self.y_idx + 1) * HEIGHT_CHUNK, HEIGHT)
-        x_start = self.x_idx * WIDTH_CHUNK
-        x_end = min((self.x_idx + 1) * WIDTH_CHUNK, WIDTH)
+        unique_dekads = np.unique(dekad_array[:])
+        for i in unique_dekads:
+            logger.info(f"Submitting task for dekad {i}...")
+            context.submit_subtask(
+                CalculateMinMaxForDekad(
+                    fpar_zarr_path=self.fpar_zarr_path,
+                    min_max_zarr_path=self.min_max_zarr_path,
+                    dekad=int(i), # numpy uint8 can't be serialized
+                )
+            )
+        logger.info(f"Submitted {len(unique_dekads)} dekad processing tasks.")
 
-        # Select the spatial chunk for all time points.
-        chunk_selection = fpar_array[:, y_start:y_end, x_start:x_end]
 
-        # Use xarray's built-in, optimized methods to calculate min/max along the time dimension.
-        # skipna=True correctly handles the _FillValue. The result is a 2D DataArray.
-        min_values = chunk_selection.where(chunk_selection != FILL_VALUE).min(dim="time", skipna=True).astype("u1")
-        max_values = chunk_selection.where(chunk_selection != FILL_VALUE).max(dim="time", skipna=True).astype("u1")
+def _split_interval(start: int, end: int, max_size: int) -> Iterator[tuple[int, int]]:
+    """
+    Split an interval into two sub-intervals in case it is larger than the given maximum size.
+    The split is done at the closest power of two.
 
-        root = zarr.open_group(store=zarr_store, mode="r+", use_consolidated=False)
-        min_array = root["min_fpar"]    
-        max_array = root["max_fpar"]
+    Example:
+        _split_interval(0, 1000, 512) -> (0, 512), (512, 1000)
+        _split_interval(512, 1000, 512) -> (512, 1000)
+    """
+    n = end - start
+    if n > max_size:
+        split_at = 2 ** math.floor(math.log2(n - 1)) + start
+        yield start, split_at
+        yield split_at, end
+    else:
+        yield start, end
 
-        # Write the resulting 2D chunks directly to the corresponding regions in the Zarr arrays.
-        min_array[y_start:y_end, x_start:x_end] = min_values.values  # type: ignore[index]
-        max_array[y_start:y_end, x_start:x_end] = max_values.values  # type: ignore[index]
 
-        logger.info(f"Successfully calculated and wrote min/max for chunk ({self.y_idx}, {self.x_idx}).")
+@dataclass(frozen=True, order=True)
+class SpatialChunk:
+    """
+    SpatialChunk represents a 2D chunk within a potentially larger 2D space.
+
+    It is useful for sub-dividing larger 2D spaces into smaller chunks for parallel processing.
+    """
+
+    y_start: int
+    y_end: int
+    x_start: int
+    x_end: int
+
+    def __str__(self) -> str:
+        """String representation of the chunk in slice notation."""
+        return f"{self.y_start}:{self.y_end}, {self.x_start}:{self.x_end}"
+
+    def __repr__(self) -> str:
+        return (
+            f"SpatialChunk({self.y_start}, {self.y_end}, {self.x_start}, {self.x_end})"
+        )
+
+    def immediate_sub_chunks(self, y_size: int, x_size: int) -> list["SpatialChunk"]:
+        """
+        Subdivide a given chunk into at most four sub-chunks, for dividing it for parallel processing.
+
+        If a chunk is already smaller than the given size in both dimensions, it will no longer be subdivided and
+        instead returned as it is as single element list.
+
+        By calling this function recursively, a chunk tree is created, where each node is a chunk and the leaves are
+        all chunks that are at most (y_size, x_size)
+
+        Returns:
+            list[SpatialChunk]: A list of immediate sub-chunks of this chunk by splitting it into at most
+                four sub-chunks.
+        """
+        sub_chunks = []
+        for y_start, y_end in _split_interval(self.y_start, self.y_end, y_size):
+            for x_start, x_end in _split_interval(self.x_start, self.x_end, x_size):
+                sub_chunks.append(SpatialChunk(y_start, y_end, x_start, x_end))
+        return sub_chunks
+
+
+class CalculateMinMaxForDekad(Task):
+    """
+    Submits a subtask for each spatial chunk for a given dekad.
+    """
+
+    fpar_zarr_path: str
+    min_max_zarr_path: str
+    dekad: int
+    spatial_chunk: SpatialChunk | None = None
+
+    def execute(self, context: ExecutionContext) -> None:
+        logger = get_logger()
+        logger.info(f"Orchestrating min/max for dekad {self.dekad}...")
+
+        if self.spatial_chunk is None:
+            spatial_chunk = SpatialChunk(0, HEIGHT, 0, WIDTH)
+            logger.info(f"Created root chunk {spatial_chunk}...")
+        else:
+            logger.info(f"Processing chunk {self.spatial_chunk}...")
+            spatial_chunk = SpatialChunk(self.spatial_chunk["y_start"], self.spatial_chunk["y_end"], self.spatial_chunk["x_start"], self.spatial_chunk["x_end"])
+
+        sub_chunks = spatial_chunk.immediate_sub_chunks(HEIGHT_CHUNK, WIDTH_CHUNK)
+        if len(sub_chunks) > 1:
+            for chunk in sub_chunks:
+                context.submit_subtask(
+                    CalculateMinMaxForDekad(
+                        fpar_zarr_path=self.fpar_zarr_path,
+                        min_max_zarr_path=self.min_max_zarr_path,
+                        dekad=self.dekad,
+                        spatial_chunk=chunk,
+                    )
+                )
+            return
+
+        chunk = sub_chunks[0]  # one chunk, process it
+
+        logger.info(f"Opening FPAR Zarr store...")
+        fpar_object_store = GCSStore(
+            bucket=GCS_BUCKET,
+            prefix=self.fpar_zarr_path,
+            credential_provider=GoogleCredentialProvider(),
+        )
+        fpar_zarr_store = ZarrObjectStore(fpar_object_store)
+
+        logger.info(f"Opening MinMax Zarr store...")
+        min_max_object_store = GCSStore(
+            bucket=GCS_BUCKET,
+            prefix=self.min_max_zarr_path,
+            credential_provider=GoogleCredentialProvider(),
+        )
+        min_max_zarr_store = ZarrObjectStore(min_max_object_store)
+
+        logger.info(f"Reading Dekad array...")
+        fpar_zarr_group = zarr.open_group(store=fpar_zarr_store, mode="r")
+        dekad_array = fpar_zarr_group["dekad"][:]  # type: ignore
+        relevant_dekad_indices = np.where(dekad_array == self.dekad)[0]
+
+        logger.info(f"Reading FPAR array...")
+        fpar_for_dekad = fpar_zarr_group["fpar"][
+            relevant_dekad_indices,
+            chunk.y_start : chunk.y_end,
+            chunk.x_start : chunk.x_end,
+        ]
+        
+        logger.info(f"Computing min/max for dekad {self.dekad}...")
+        # todo fill value
+        min_fpar = np.ma.masked_array(fpar_for_dekad, fpar_for_dekad==255).min(axis=0)
+        max_fpar = np.ma.masked_array(fpar_for_dekad, fpar_for_dekad==255).max(axis=0)
+        
+        logger.info(f"Writing min/max for dekad {self.dekad}...")        
+        min_max_group = zarr.open_group(store=min_max_zarr_store, mode="a")
+        min_max_group["min_fpar"][
+            self.dekad - 1, chunk.y_start : chunk.y_end, chunk.x_start : chunk.x_end
+        ] = min_fpar  # type: ignore[index]
+        min_max_group["max_fpar"][
+            self.dekad - 1, chunk.y_start : chunk.y_end, chunk.x_start : chunk.x_end
+        ] = max_fpar  # type: ignore[index]
+        logger.info(f"Successfully wrote min/max for dekad {self.dekad}.")
