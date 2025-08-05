@@ -25,18 +25,12 @@ from tilebox.workflows.observability.logging import (  # type: ignore[import-unt
 from tilebox.workflows.observability.tracing import (  # type: ignore[import-untyped]
     configure_otel_tracing_axiom,
 )
-from vci import (
-    CalculateVciDekad,
-    InitializeVciArray,
-    ComputeVciSlice,
-    ComputeVci
-)
+from vci import CalculateVciDekad, InitializeVciArray, ComputeVciSlice, ComputeVci
 from vci_visualization import (
-    CreateVciFramesByYear,
-    CreateVciFramesForYear,
     CreateSingleVciFrame,
     CreateVideoFromFrames,
-    CreateVciVideo,
+    CreateVciMp4,
+    CreateVciFrames,
     DownloadVideoFromCache,
 )
 from vci_workflow import VciWorkflow
@@ -74,9 +68,8 @@ if __name__ == "__main__":
             CalculateVciDekad,
             CalculateMinMaxForDekad,
             OrchestrateDekadMinMaxCalculation,
-            CreateVciVideo,
-            CreateVciFramesByYear,
-            CreateVciFramesForYear,
+            CreateVciMp4,
+            CreateVciFrames,
             CreateSingleVciFrame,
             CreateVideoFromFrames,
             DownloadVideoFromCache,

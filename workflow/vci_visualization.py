@@ -16,6 +16,7 @@ from PIL.Image import Image as ImageFile
 from tilebox.workflows import ExecutionContext, Task  # type: ignore[import-untyped]
 from tilebox.workflows.cache import JobCache
 from tilebox.workflows.observability.logging import get_logger  # type: ignore[import-untyped]
+import zarr
 from zarr.storage import ObjectStore as ZarrObjectStore
 
 from config import (
@@ -73,11 +74,11 @@ def get_logo(scale: float = 0.7) -> Any:
     return logo
 
 
-class CreateVciVideo(Task):
+class CreateVciMp4(Task):
     """Main task to orchestrate VCI MP4 video creation."""
 
-    job_id: str | None = None
-    time_range: str | None = None
+    vci_zarr_path: str
+    fpar_zarr_path: str
     downsample_factor: int | None = None
     output_cluster: str | None = None
 
@@ -94,38 +95,48 @@ class CreateVciVideo(Task):
         # )
 
         # Convert datetime range to time indices
-        if time_range_str:
-            start_str, end_str = time_range_str.split("/")
-            start_datetime = datetime.fromisoformat(start_str)
-            end_datetime = datetime.fromisoformat(end_str)
 
-            start_year_dekad = (2000, 15)
+        # open zarr
+        object_store = GCSStore(
+            bucket=GCS_BUCKET,
+            prefix=self.vci_zarr_path,
+            credential_provider=GoogleCredentialProvider(),
+        )
+        zarr_store = ZarrObjectStore(object_store)
+        vci_group = zarr.open_group(store=zarr_store, mode="r")
+        vci_array = vci_group["vci"]
 
-            start_year = start_datetime.year
-            start_dekad = (
-                ((start_datetime.month - 1) * 3) + ((start_datetime.day - 1) // 10) + 1
+        object_store = GCSStore(
+            bucket=GCS_BUCKET,
+            prefix=self.fpar_zarr_path,
+            credential_provider=GoogleCredentialProvider(),
+        )
+        fpar_zarr_store = ZarrObjectStore(object_store)
+        fpar_group = zarr.open_group(store=fpar_zarr_store, mode="r")
+        dekad_array = fpar_group["dekad"]
+        year_array = fpar_group["year"]
+
+        if year_array.shape[0] != dekad_array.shape[0]:
+            raise ValueError(
+                f"Year and dekad arrays have different lengths: {year_array.shape[0]} != {dekad_array.shape[0]}"
             )
-            start_dekad = max(1, min(36, start_dekad))
-
-            end_year = end_datetime.year
-            end_dekad = (
-                ((end_datetime.month - 1) * 3) + ((end_datetime.day - 1) // 10) + 1
+        if year_array.shape[0] != vci_array.shape[0]:
+            raise ValueError(
+                f"Year array and VCI array have different lengths: {year_array.shape[0]} != {vci_array.shape[0]}"
             )
-            end_dekad = max(1, min(36, end_dekad))
 
-            start_idx = _calc_time_index(start_year, start_dekad, *start_year_dekad)
-            end_idx = _calc_time_index(end_year, end_dekad, *start_year_dekad) + 1
-
-            context.job_cache["time_range"] = pickle.dumps((start_idx, end_idx))
-            logger.info(
-                f"Converted datetime range {time_range_str} to time indices {start_idx}-{end_idx - 1}"
+        context.submit_subtask(
+            CreateVciFrames(
+                slice=(0, vci_array.shape[0]),
+                vci_zarr_path=self.vci_zarr_path,
+                fpar_zarr_path=self.fpar_zarr_path,
             )
-        else:
-            logger.info("No time range specified, will process all available data")
+        )
 
         create_frames_task = context.submit_subtask(CreateVciFramesByYear())
         create_video_task = context.submit_subtask(
-            CreateVideoFromFrames(), depends_on=[create_frames_task]
+            CreateVideoFromFrames(slice=(0, vci_array.shape[0])),
+            depends_on=[create_frames_task],
         )
         context.submit_subtask(
             DownloadVideoFromCache(),
@@ -134,119 +145,84 @@ class CreateVciVideo(Task):
         )
 
 
-class CreateVciFramesByYear(Task):
-    """Orchestrates frame creation by year to respect the 64 subtask limit."""
+class CreateVciFrames(Task):
+    """Creates frames for a specific time range."""
+
+    vci_zarr_path: str
+    fpar_zarr_path: str
+    slice: tuple[int, int]
+    downsample_factor: int | None = None
 
     def execute(self, context: ExecutionContext) -> None:
-        logger = get_logger()
-        logger.info("Orchestrating VCI frame creation by year...")
-
-        job_id: str = from_param_or_cache(None, context.job_cache, "job_id")
-
-        zarr_prefix = f"{ZARR_STORE_PATH}/{job_id}/cube.zarr"
-        object_store = GCSStore(
-            bucket=GCS_BUCKET,
-            prefix=zarr_prefix,
-            credential_provider=GoogleCredentialProvider(),
-        )
-        zarr_store = ZarrObjectStore(object_store)
-        ds = xr.open_zarr(zarr_store, consolidated=False)
-        vci_array = ds["vci"]
-
-        time_range: tuple[int, int] = from_param_or_cache(
-            None, context.job_cache, "time_range", default=(0, vci_array.shape[0])
-        )
-        start_idx, end_idx = time_range
-
-        start_year_dekad = (2000, 15)
-
-        start_year, _ = _calc_year_dekad_from_time_index(
-            start_idx, *start_year_dekad
-        )
-        end_year, _ = _calc_year_dekad_from_time_index(
-            end_idx - 1, *start_year_dekad
-        )
-
-        logger.info(f"Processing years {start_year} to {end_year}")
-
-        for year in range(start_year, end_year + 1):
-            year_start_idx = _calc_time_index(year, 1, *start_year_dekad)
-            year_end_idx = _calc_time_index(year + 1, 1, *start_year_dekad)
-
-            actual_start = max(start_idx, year_start_idx)
-            actual_end = min(end_idx, year_end_idx)
-
-            if actual_start < actual_end:
-                context.submit_subtask(
-                    CreateVciFramesForYear(
-                        year=year, time_start=actual_start, time_end=actual_end
-                    )
+        start = self.slice[0]
+        end = self.slice[1]
+        if end - start > 8:
+            middle = start + (end - start) // 2
+            context.submit_subtask(
+                CreateVciFrames(
+                    vci_zarr_path=self.vci_zarr_path,
+                    fpar_zarr_path=self.fpar_zarr_path,
+                    slice=(start, middle),
                 )
-                logger.info(
-                    f"Submitted year {year}: time indices {actual_start} to {actual_end - 1}"
+            )
+            context.submit_subtask(
+                CreateVciFrames(
+                    vci_zarr_path=self.vci_zarr_path,
+                    fpar_zarr_path=self.fpar_zarr_path,
+                    downsample_factor=self.downsample_factor,
+                    slice=(middle, end),
                 )
+            )
+            return
 
-        logger.info(
-            f"Submitted frame creation tasks for years {start_year} to {end_year}"
-        )
-
-
-class CreateVciFramesForYear(Task):
-    """Creates frames for a specific year (up to 36 time periods)."""
-
-    year: int
-    time_start: int
-    time_end: int
-
-    def execute(self, context: ExecutionContext) -> None:
-        logger = get_logger()
-        logger.info(
-            f"Creating VCI frames for year {self.year} (time indices {self.time_start} to {self.time_end})"
-        )
-
-        for time_idx in range(self.time_start, self.time_end):
-            context.submit_subtask(CreateSingleVciFrame(time_index=time_idx))
-
-        logger.info(
-            f"Submitted {self.time_end - self.time_start} frame creation tasks for year {self.year}"
-        )
+        for time_idx in range(start, end):
+            context.submit_subtask(
+                CreateSingleVciFrame(
+                    vci_zarr_path=self.vci_zarr_path,
+                    fpar_zarr_path=self.fpar_zarr_path,
+                    downsample_factor=self.downsample_factor,
+                    time_index=time_idx,
+                )
+            )
 
 
 class CreateSingleVciFrame(Task):
     """Creates a single VCI frame for a specific time index."""
 
     time_index: int
+    vci_zarr_path: str
+    fpar_zarr_path: str
+    downsample_factor: int | None = None
 
     def execute(self, context: ExecutionContext) -> None:
         logger = get_logger()
         logger.info(f"Creating VCI frame for time index {self.time_index}")
 
-        job_id: str = from_param_or_cache(None, context.job_cache, "job_id")
-        downsample_factor: int = from_param_or_cache(
-            None, context.job_cache, "downsample_factor", 20
-        )
-
-        zarr_prefix = f"{ZARR_STORE_PATH}/{job_id}/cube.zarr"
         object_store = GCSStore(
             bucket=GCS_BUCKET,
-            prefix=zarr_prefix,
+            prefix=self.vci_zarr_path,
             credential_provider=GoogleCredentialProvider(),
         )
         zarr_store = ZarrObjectStore(object_store)
         ds = xr.open_zarr(zarr_store, consolidated=False)
-
         vci_array = ds["vci"]
 
-        if self.time_index >= vci_array.shape[0]:
-            logger.warning(
-                f"Time index {self.time_index} is out of bounds (max: {vci_array.shape[0] - 1})"
-            )
-            return
-
-        vci_slice = vci_array[self.time_index, ::downsample_factor, ::downsample_factor]
+        vci_slice = vci_array[
+            self.time_index, :: self.downsample_factor, :: self.downsample_factor
+        ]
         vci_data = vci_slice.compute()
 
-        start_year_dekad = (2000, 15)
+        object_store = GCSStore(
+            bucket=GCS_BUCKET,
+            prefix=self.fpar_zarr_path,
+            credential_provider=GoogleCredentialProvider(),
+        )
+        fpar_zarr_store = ZarrObjectStore(object_store)
+        fpar_group = zarr.open_group(store=fpar_zarr_store, mode="r")
+        dekad_array = fpar_group["dekad"]
+        year_array = fpar_group["year"]
+
+        start_year_dekad = (year_array[0].item(), dekad_array[0].item())
 
         self._create_frame_image(vci_data, self.time_index, start_year_dekad, context)
 
@@ -339,16 +315,15 @@ class CreateSingleVciFrame(Task):
 class CreateVideoFromFrames(Task):
     """Creates an MP4 video from the individual frame images using ffmpeg."""
 
+    slice: tuple[int, int]
+
     def execute(self, context: ExecutionContext) -> None:
         logger = get_logger()
         logger.info("Creating MP4 video from frames...")
 
         frame_paths = []
 
-        time_range: tuple[int, int] = from_param_or_cache(
-            None, context.job_cache, "time_range"
-        )
-        start_idx, end_idx = time_range
+        start_idx, end_idx = self.slice
 
         import tempfile
 
