@@ -1,4 +1,6 @@
+from functools import lru_cache
 import pickle
+from typing import Any, Dict, Literal
 import numpy as np
 import xarray as xr
 import zarr
@@ -18,7 +20,64 @@ from config import (
     WIDTH_CHUNK,
     ZARR_STORE_PATH,
     _calc_time_index,
+    _calc_year_dekad_from_time_index,
 )
+from minmax import SpatialChunk
+from utils import from_param_or_cache
+
+
+class ComputeVci(Task):
+    """
+    Computes the VCI for each time slice and stores it in the Zarr store.
+    """
+
+    fpar_zarr_path: str
+    min_max_zarr_path: str
+    vci_zarr_path: str
+
+    def execute(self, context: ExecutionContext) -> None:
+        logger = get_logger()
+        logger.info("Computing VCI...")
+
+        object_store = GCSStore(
+            bucket=GCS_BUCKET,
+            prefix=self.fpar_zarr_path,
+            credential_provider=GoogleCredentialProvider(),
+        )
+        fpar_zarr_store = ZarrObjectStore(object_store)
+        fpar_group = zarr.open_group(store=fpar_zarr_store, mode="r")
+
+        object_store = GCSStore(
+            bucket=GCS_BUCKET,
+            prefix=self.min_max_zarr_path,
+            credential_provider=GoogleCredentialProvider(),
+        )
+        min_max_zarr_store = ZarrObjectStore(object_store)
+        min_max_group = zarr.open_group(store=min_max_zarr_store, mode="r")
+
+        object_store = GCSStore(
+            bucket=GCS_BUCKET,
+            prefix=self.vci_zarr_path,
+            credential_provider=GoogleCredentialProvider(),
+        )
+
+        vci_init_task = context.submit_subtask(
+            InitializeVciArray(
+                vci_zarr_path=self.vci_zarr_path,
+                fpar_zarr_path=self.fpar_zarr_path,
+            )
+        )
+
+        context.submit_subtask(
+            ComputeVciSlice(
+                vci_zarr_path=self.vci_zarr_path,
+                fpar_zarr_path=self.fpar_zarr_path,
+                min_max_zarr_path=self.min_max_zarr_path,
+            ),
+            depends_on=[vci_init_task],
+        )
+
+        logger.info("Successfully submitted VCI computation tasks.")
 
 
 class InitializeVciArray(Task):
@@ -27,90 +86,134 @@ class InitializeVciArray(Task):
     This task is chained to run after the min/max calculation is complete.
     """
 
+    vci_zarr_path: str
+    fpar_zarr_path: str
+    # job_id: str | None = None
+    # shape: tuple[int, int, int] | None = None
+    # chunks: tuple[int, int, int] | None = None
+
     def execute(self, context: ExecutionContext) -> None:
         logger = get_logger()
         logger.info("Initializing VCI array...")
 
-        zarr_prefix = f"{ZARR_STORE_PATH}/{context.current_task.job.id}/cube.zarr"
         object_store = GCSStore(
-            bucket=GCS_BUCKET, prefix=zarr_prefix, credential_provider=GoogleCredentialProvider()
+            bucket=GCS_BUCKET,
+            prefix=self.fpar_zarr_path,
+            credential_provider=GoogleCredentialProvider(),
         )
         zarr_store = ZarrObjectStore(object_store)
-        root = zarr.open_group(store=zarr_store, mode="r+")
+        fpar_group = zarr.open_group(store=zarr_store, mode="r")
 
-        if not isinstance(root, zarr.Group):
-            raise TypeError(f"Expected a Zarr Group, but got {type(root)}")
+        object_store = GCSStore(
+            bucket=GCS_BUCKET,
+            prefix=self.vci_zarr_path,
+            credential_provider=GoogleCredentialProvider(),
+        )
+        zarr_store = ZarrObjectStore(object_store)
 
-        # Read shape and chunks from the cache
-        shape = pickle.loads(context.job_cache["shape"])
-        chunks = pickle.loads(context.job_cache["chunks"])
-
-        root.create_array(
-            "vci",
-            shape=shape,
-            chunks=chunks,
-            dtype="f4",  # VCI is a float
+        zarr.create_array(
+            store=zarr_store,
+            name="vci",
+            shape=fpar_group["fpar"].shape,
+            chunks=fpar_group["fpar"].chunks,
+            dtype=np.float32,  # VCI is a float
             compressors=COMPRESSOR,
             fill_value=np.nan,
-            overwrite=True,
             dimension_names=["time", "y", "x"],
         )
 
+        # zarr.create_array(
+        #     store=zarr_store,
+        #     name="year",
+        #     shape=(fpar_group["fpar"].shape[0],),
+        #     chunks=(1,),
+        #     dtype=np.int32,  # VCI is a float
+        #     compressors=COMPRESSOR,
+        #     fill_value=9999,
+        #     dimension_names=["time"],
+        # )
+        # zarr.create_array(
+        #     store=zarr_store,
+        #     name="dekad",
+        #     shape=(fpar_group["fpar"].shape[0],),
+        #     chunks=(1,),
+        #     dtype=np.int32,  # VCI is a float
+        #     compressors=COMPRESSOR,
+        #     fill_value=9999,
+        #     dimension_names=["time"],
+        # )
+
         logger.info("Successfully initialized VCI array.")
-        context.submit_subtask(OrchestrateVciByYear())
 
 
-class OrchestrateVciByYear(Task):
+class ComputeVciSlice(Task):
     """
-    Retrieves the overall time range from the cache and submits a subtask for each year.
+    Computes the VCI for each time slice and stores it in the Zarr store.
     """
+
+    vci_zarr_path: str
+    fpar_zarr_path: str
+    min_max_zarr_path: str
+    slice: tuple[int, int] | None = None
 
     def execute(self, context: ExecutionContext) -> None:
         logger = get_logger()
-        logger.info("Orchestrating VCI calculation by year...")
+        logger.info("Computing VCI...")
 
-        dekad_range = pickle.loads(context.job_cache["dekad_range"])
+        object_store = GCSStore(
+            bucket=GCS_BUCKET,
+            prefix=self.fpar_zarr_path,
+            credential_provider=GoogleCredentialProvider(),
+        )
+        fpar_zarr_store = ZarrObjectStore(object_store)
+        fpar_group = zarr.open_group(store=fpar_zarr_store, mode="r")
+        dekad_array = fpar_group["dekad"]
 
-        start_year = dekad_range["start"][0]
-        end_year = dekad_range["end"][0]
+        slice = self.slice
+        if slice is None:  # do the whole thing, fetch number of timestamps from zarr
+            slice = (0, dekad_array.shape[0])
 
-        for year in range(start_year, end_year + 1):
-            context.submit_subtask(CalculateVciForYear(year=year))
+        n_timestamps = slice[1] - slice[0]
+        context.current_task.display = f"ComputeVciSlice[{slice[0]}:{slice[1]}]"
+        if n_timestamps > 4:
+            middle = slice[0] + n_timestamps // 2
+            context.submit_subtask(
+                ComputeVciSlice(
+                    vci_zarr_path=self.vci_zarr_path,
+                    fpar_zarr_path=self.fpar_zarr_path,
+                    min_max_zarr_path=self.min_max_zarr_path,
+                    slice=(slice[0], middle),
+                )
+            )
+            context.submit_subtask(
+                ComputeVciSlice(
+                    vci_zarr_path=self.vci_zarr_path,
+                    fpar_zarr_path=self.fpar_zarr_path,
+                    min_max_zarr_path=self.min_max_zarr_path,
+                    slice=(middle, slice[1]),
+                )
+            )
+            return
 
-        logger.info(f"Submitted VCI calculation tasks for years {start_year} to {end_year}.")
+        for time_idx in range(slice[0], slice[1]):
+            context.submit_subtask(
+                CalculateVciDekad(
+                    vci_zarr_path=self.vci_zarr_path,
+                    fpar_zarr_path=self.fpar_zarr_path,
+                    min_max_zarr_path=self.min_max_zarr_path,
+                    time_index=time_idx,
+                )
+            )
 
 
-class CalculateVciForYear(Task):
-    """
-    Submits a subtask for each dekad within a given year.
-    """
-
-    year: int
-
-    def execute(self, context: ExecutionContext) -> None:
-        logger = get_logger()
-        logger.info(f"Calculating VCI for year {self.year}...")
-
-        dekad_range = pickle.loads(context.job_cache["dekad_range"])
-
-        start_year_dekad = dekad_range["start"]
-        end_year_dekad = dekad_range["end"]
-
-        # Determine the dekad range for the current year
-        start_dekad = 1
-        if self.year == start_year_dekad[0]:
-            start_dekad = start_year_dekad[1]
-
-        end_dekad = 36
-        if self.year == end_year_dekad[0]:
-            end_dekad = end_year_dekad[1]
-
-        for dekad in range(start_dekad, end_dekad + 1):
-            time_index = _calc_time_index(self.year, dekad, *start_year_dekad)
-            if time_index >= 0:
-                context.submit_subtask(CalculateVciDekad(time_index=time_index))
-
-        logger.info(f"Submitted VCI tasks for dekads {start_dekad}-{end_dekad} in year {self.year}.")
+@lru_cache
+def open_zarr_store(path: str, mode: Literal["r", "r+", "w"] = "r") -> ZarrObjectStore:
+    object_store = GCSStore(
+        bucket=GCS_BUCKET,
+        prefix=path,
+        credential_provider=GoogleCredentialProvider(),
+    )
+    return ZarrObjectStore(object_store)
 
 
 class CalculateVciDekad(Task):
@@ -119,75 +222,89 @@ class CalculateVciDekad(Task):
     spatial chunk tasks for parallel processing.
     """
 
+    vci_zarr_path: str
+    fpar_zarr_path: str
+    min_max_zarr_path: str
     time_index: int
+    spatial_chunk: SpatialChunk | None = None
 
     def execute(self, context: ExecutionContext) -> None:
         logger = get_logger()
-        logger.info(f"Orchestrating VCI calculation for time index {self.time_index}...")
-
-        num_y_chunks = (HEIGHT + HEIGHT_CHUNK - 1) // HEIGHT_CHUNK
-        num_x_chunks = (WIDTH + WIDTH_CHUNK - 1) // WIDTH_CHUNK
-
-        for y_idx in range(num_y_chunks):
-            for x_idx in range(num_x_chunks):
-                context.submit_subtask(CalculateVciChunk(time_index=self.time_index, y_idx=y_idx, x_idx=x_idx))
-
-        logger.info(f"Submitted {num_y_chunks * num_x_chunks} VCI chunk tasks for time index {self.time_index}.")
-
-
-class CalculateVciChunk(Task):
-    """
-    Calculates the VCI for a single spatial chunk at a specific time slice.
-    VCI = (FPAR - FPAR_min) / (FPAR_max - FPAR_min)
-    """
-
-    time_index: int
-    y_idx: int
-    x_idx: int
-
-    def execute(self, context: ExecutionContext) -> None:
-        logger = get_logger()
-        logger.info(f"Calculating VCI for time index {self.time_index}, chunk ({self.y_idx}, {self.x_idx})...")
-
-        zarr_prefix = f"{ZARR_STORE_PATH}/{context.current_task.job.id}/cube.zarr"
-        object_store = GCSStore(
-            bucket=GCS_BUCKET, prefix=zarr_prefix, credential_provider=GoogleCredentialProvider()
+        logger.info(
+            f"Orchestrating VCI calculation for time index {self.time_index}..."
         )
-        zarr_store = ZarrObjectStore(object_store)
 
-        ds = xr.open_zarr(zarr_store, consolidated=False)
+        if self.spatial_chunk is None:
+            spatial_chunk = SpatialChunk(0, HEIGHT, 0, WIDTH)
+            logger.info(f"Created root chunk {spatial_chunk}...")
+        else:
+            logger.info(f"Processing chunk {self.spatial_chunk}...")
+            spatial_chunk = SpatialChunk(
+                self.spatial_chunk["y_start"],
+                self.spatial_chunk["y_end"],
+                self.spatial_chunk["x_start"],
+                self.spatial_chunk["x_end"],
+            )
 
-        # Calculate spatial chunk boundaries
-        y_start = self.y_idx * HEIGHT_CHUNK
-        y_end = min((self.y_idx + 1) * HEIGHT_CHUNK, HEIGHT)
-        x_start = self.x_idx * WIDTH_CHUNK
-        x_end = min((self.x_idx + 1) * WIDTH_CHUNK, WIDTH)
+        sub_chunks = spatial_chunk.immediate_sub_chunks(HEIGHT_CHUNK, WIDTH_CHUNK)
+        if len(sub_chunks) > 1:
+            for chunk in sub_chunks:
+                context.submit_subtask(
+                    CalculateVciDekad(
+                        vci_zarr_path=self.vci_zarr_path,
+                        fpar_zarr_path=self.fpar_zarr_path,
+                        min_max_zarr_path=self.min_max_zarr_path,
+                        time_index=self.time_index,
+                        spatial_chunk=chunk,
+                    )
+                )
+            return
 
-        # Select the spatial chunk for the specific time slice
-        fpar = ds["fpar"].isel(time=self.time_index)[y_start:y_end, x_start:x_end]
-        fpar_min = ds["min_fpar"][y_start:y_end, x_start:x_end]
-        fpar_max = ds["max_fpar"][y_start:y_end, x_start:x_end]
+        chunk = sub_chunks[0]  # one chunk, process it
+        logger.info(f"Opening FPAR Zarr store...")
+        fpar_zarr_store = open_zarr_store(self.fpar_zarr_path)
+        fpar_group = zarr.open_group(store=fpar_zarr_store, mode="r")
+        dekad_array = fpar_group["dekad"]
 
-        # Ensure we are working with floats for the calculation
-        fpar = fpar.astype("f4")
-        fpar_min = fpar_min.astype("f4")
-        fpar_max = fpar_max.astype("f4")
+        logger.info(f"Opening MinMax Zarr store...")
+        min_max_zarr_store = open_zarr_store(self.min_max_zarr_path)
 
-        # Replace the fill value with NaN to ensure correct calculations
-        fpar = fpar.where(fpar != FILL_VALUE)
-        fpar_min = fpar_min.where(fpar_min != FILL_VALUE)
-        fpar_max = fpar_max.where(fpar_max != FILL_VALUE)
+        logger.info(f"Opening VCI Zarr store...")
+        vci_zarr_store = open_zarr_store(self.vci_zarr_path, mode="a")
+        vci_group = zarr.open_group(store=vci_zarr_store, mode="a")
+        vci_array = vci_group["vci"]
 
-        fpar_range = fpar_max - fpar_min
-        # Use .where to avoid division by zero, placing NaN where the range is zero.
-        vci = ((fpar - fpar_min) / fpar_range).where(fpar_range > 0)
-        vci = vci.astype("f4")
+        logger.info(
+            f"Calculating VCI for time index {self.time_index} and chunk {chunk}..."
+        )
+        dekad = dekad_array[self.time_index].item()
 
-        # Open the Zarr group directly for writing.
-        root = zarr.open_group(store=zarr_store, mode="r+", use_consolidated=False)
-        vci_array = root["vci"]
+        min_fpar = xr.open_zarr(min_max_zarr_store, consolidated=False)["min_fpar"][
+            dekad - 1, chunk.y_start : chunk.y_end, chunk.x_start : chunk.x_end
+        ]
+        # min_fpar = min_max_group["min_fpar"][
+        #     dekad - 1, chunk.y_start : chunk.y_end, chunk.x_start : chunk.x_end
+        # ]
+        # max_fpar = min_max_group["max_fpar"][
+        #     dekad - 1, chunk.y_start : chunk.y_end, chunk.x_start : chunk.x_end
+        # ]
+        max_fpar = xr.open_zarr(min_max_zarr_store, consolidated=False)["max_fpar"][
+            dekad - 1, chunk.y_start : chunk.y_end, chunk.x_start : chunk.x_end
+        ]
+        # fpar = fpar_group["fpar"][
+        #     self.time_index, chunk.y_start : chunk.y_end, chunk.x_start : chunk.x_end
+        # ]
+        fpar = xr.open_zarr(fpar_zarr_store, consolidated=False)["fpar"][
+            self.time_index, chunk.y_start : chunk.y_end, chunk.x_start : chunk.x_end
+        ]
 
-        # Write the computed VCI values to the corresponding spatial chunk in the Zarr array.
-        vci_array[self.time_index, y_start:y_end, x_start:x_end] = vci.values  # type: ignore[index]
+        fpar_range = max_fpar - min_fpar
+        vci = ((fpar - min_fpar) / fpar_range).where(fpar_range > 0)
 
-        logger.info(f"Successfully calculated and wrote VCI for time index {self.time_index}, chunk ({self.y_idx}, {self.x_idx}).")
+
+        vci_array[
+            self.time_index, chunk.y_start : chunk.y_end, chunk.x_start : chunk.x_end
+        ] = vci.values  # type: ignore[index]
+        logger.info(
+            f"Successfully calculated and wrote VCI for time index {self.time_index} and chunk {chunk}."
+        )

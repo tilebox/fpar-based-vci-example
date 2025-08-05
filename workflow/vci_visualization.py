@@ -12,7 +12,9 @@ from matplotlib import colormaps
 from obstore.auth.google import GoogleCredentialProvider
 from obstore.store import GCSStore
 from PIL import Image, ImageDraw, ImageFont
+from PIL.Image import Image as ImageFile
 from tilebox.workflows import ExecutionContext, Task  # type: ignore[import-untyped]
+from tilebox.workflows.cache import JobCache
 from tilebox.workflows.observability.logging import get_logger  # type: ignore[import-untyped]
 from zarr.storage import ObjectStore as ZarrObjectStore
 
@@ -22,6 +24,7 @@ from config import (
     _calc_time_index,
     _calc_year_dekad_from_time_index,
 )
+from utils import from_param_or_cache
 
 
 @lru_cache
@@ -65,7 +68,7 @@ def get_logo(scale: float = 0.7) -> Any:
         with local.open("wb") as f:
             f.write(memoryview(assets_store.get(str(local)).bytes()))
 
-    logo = Image.open(str(local))
+    logo: ImageFile = Image.open(str(local))
     logo = logo.resize((int(logo.size[0] * scale), int(logo.size[1] * scale)))
     return logo
 
@@ -73,21 +76,26 @@ def get_logo(scale: float = 0.7) -> Any:
 class CreateVciVideo(Task):
     """Main task to orchestrate VCI MP4 video creation."""
 
-    job_id: str
+    job_id: str | None = None
     time_range: str | None = None
-    downsample_factor: int = 20
+    downsample_factor: int | None = None
     output_cluster: str | None = None
 
     def execute(self, context: ExecutionContext) -> None:
         logger = get_logger()
         logger.info("Starting VCI MP4 video creation...")
 
-        context.job_cache["job_id"] = self.job_id.encode()
-        context.job_cache["downsample_factor"] = str(self.downsample_factor).encode()
+        # from_param_or_cache(self.job_id, context.job_cache, "job_id")
+        # from_param_or_cache(
+        #     self.downsample_factor, context.job_cache, "downsample_factor", default=20
+        # )
+        # time_range_str = from_param_or_cache(
+        #     self.time_range, context.job_cache, "time_range_str", default=None
+        # )
 
         # Convert datetime range to time indices
-        if self.time_range:
-            start_str, end_str = self.time_range.split("/")
+        if time_range_str:
+            start_str, end_str = time_range_str.split("/")
             start_datetime = datetime.fromisoformat(start_str)
             end_datetime = datetime.fromisoformat(end_str)
 
@@ -110,7 +118,7 @@ class CreateVciVideo(Task):
 
             context.job_cache["time_range"] = pickle.dumps((start_idx, end_idx))
             logger.info(
-                f"Converted datetime range {self.time_range} to time indices {start_idx}-{end_idx - 1}"
+                f"Converted datetime range {time_range_str} to time indices {start_idx}-{end_idx - 1}"
             )
         else:
             logger.info("No time range specified, will process all available data")
@@ -133,7 +141,7 @@ class CreateVciFramesByYear(Task):
         logger = get_logger()
         logger.info("Orchestrating VCI frame creation by year...")
 
-        job_id = context.job_cache["job_id"].decode()
+        job_id: str = from_param_or_cache(None, context.job_cache, "job_id")
 
         zarr_prefix = f"{ZARR_STORE_PATH}/{job_id}/cube.zarr"
         object_store = GCSStore(
@@ -145,17 +153,17 @@ class CreateVciFramesByYear(Task):
         ds = xr.open_zarr(zarr_store, consolidated=False)
         vci_array = ds["vci"]
 
-        if "time_range" in context.job_cache:
-            start_idx, end_idx = pickle.loads(context.job_cache["time_range"])
-        else:
-            start_idx, end_idx = 0, vci_array.shape[0]
+        time_range: tuple[int, int] = from_param_or_cache(
+            None, context.job_cache, "time_range", default=(0, vci_array.shape[0])
+        )
+        start_idx, end_idx = time_range
 
         start_year_dekad = (2000, 15)
 
-        start_year, start_dekad = _calc_year_dekad_from_time_index(
+        start_year, _ = _calc_year_dekad_from_time_index(
             start_idx, *start_year_dekad
         )
-        end_year, end_dekad = _calc_year_dekad_from_time_index(
+        end_year, _ = _calc_year_dekad_from_time_index(
             end_idx - 1, *start_year_dekad
         )
 
@@ -213,8 +221,10 @@ class CreateSingleVciFrame(Task):
         logger = get_logger()
         logger.info(f"Creating VCI frame for time index {self.time_index}")
 
-        job_id = context.job_cache["job_id"].decode()
-        downsample_factor = int(context.job_cache["downsample_factor"].decode())
+        job_id: str = from_param_or_cache(None, context.job_cache, "job_id")
+        downsample_factor: int = from_param_or_cache(
+            None, context.job_cache, "downsample_factor", 20
+        )
 
         zarr_prefix = f"{ZARR_STORE_PATH}/{job_id}/cube.zarr"
         object_store = GCSStore(
@@ -335,10 +345,10 @@ class CreateVideoFromFrames(Task):
 
         frame_paths = []
 
-        if "time_range" in context.job_cache:
-            start_idx, end_idx = pickle.loads(context.job_cache["time_range"])
-        else:
-            start_idx, end_idx = 0, 10000
+        time_range: tuple[int, int] = from_param_or_cache(
+            None, context.job_cache, "time_range"
+        )
+        start_idx, end_idx = time_range
 
         import tempfile
 

@@ -26,11 +26,10 @@ from tilebox.workflows.observability.tracing import (  # type: ignore[import-unt
     configure_otel_tracing_axiom,
 )
 from vci import (
-    CalculateVciChunk,
     CalculateVciDekad,
-    CalculateVciForYear,
     InitializeVciArray,
-    OrchestrateVciByYear,
+    ComputeVciSlice,
+    ComputeVci
 )
 from vci_visualization import (
     CreateVciFramesByYear,
@@ -63,6 +62,8 @@ if __name__ == "__main__":
     runner = client.runner(
         tasks=[
             VciWorkflow,
+            ComputeVci,
+            ComputeVciSlice,
             InitializeZarrStore,
             LoadDekadIntoZarr,
             ComputeMinMaxPerDekad,
@@ -70,10 +71,7 @@ if __name__ == "__main__":
             WriteFparDataIntoEmptyZarr,
             InitializeMinMaxArrays,
             InitializeVciArray,
-            OrchestrateVciByYear,
-            CalculateVciForYear,
             CalculateVciDekad,
-            CalculateVciChunk,
             CalculateMinMaxForDekad,
             OrchestrateDekadMinMaxCalculation,
             CreateVciVideo,
