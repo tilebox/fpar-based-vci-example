@@ -108,7 +108,6 @@ class OrchestrateDekadMinMaxCalculation(Task):
         zarr_store = ZarrObjectStore(object_store)
         dekad_array = zarr.open_group(zarr_store, mode="r")["dekad"]
 
-
         unique_dekads = np.unique(dekad_array[:])
         for i in unique_dekads:
             logger.info(f"Submitting task for dekad {i}...")
@@ -116,7 +115,7 @@ class OrchestrateDekadMinMaxCalculation(Task):
                 CalculateMinMaxForDekad(
                     fpar_zarr_path=self.fpar_zarr_path,
                     min_max_zarr_path=self.min_max_zarr_path,
-                    dekad=int(i), # numpy uint8 can't be serialized
+                    dekad=int(i),  # numpy uint8 can't be serialized
                 )
             )
         logger.info(f"Submitted {len(unique_dekads)} dekad processing tasks.")
@@ -202,7 +201,12 @@ class CalculateMinMaxForDekad(Task):
             logger.info(f"Created root chunk {spatial_chunk}...")
         else:
             logger.info(f"Processing chunk {self.spatial_chunk}...")
-            spatial_chunk = SpatialChunk(self.spatial_chunk["y_start"], self.spatial_chunk["y_end"], self.spatial_chunk["x_start"], self.spatial_chunk["x_end"])
+            spatial_chunk = SpatialChunk(
+                self.spatial_chunk["y_start"],
+                self.spatial_chunk["y_end"],
+                self.spatial_chunk["x_start"],
+                self.spatial_chunk["x_end"],
+            )
 
         sub_chunks = spatial_chunk.immediate_sub_chunks(HEIGHT_CHUNK, WIDTH_CHUNK)
         if len(sub_chunks) > 1:
@@ -240,19 +244,40 @@ class CalculateMinMaxForDekad(Task):
         dekad_array = fpar_zarr_group["dekad"][:]  # type: ignore
         relevant_dekad_indices = np.where(dekad_array == self.dekad)[0]
 
-        logger.info(f"Reading FPAR array...")
-        fpar_for_dekad = fpar_zarr_group["fpar"][
-            relevant_dekad_indices,
-            chunk.y_start : chunk.y_end,
-            chunk.x_start : chunk.x_end,
-        ]
-        
         logger.info(f"Computing min/max for dekad {self.dekad}...")
-        # todo fill value
-        min_fpar = np.ma.masked_array(fpar_for_dekad, fpar_for_dekad==255).min(axis=0)
-        max_fpar = np.ma.masked_array(fpar_for_dekad, fpar_for_dekad==255).max(axis=0)
-        
-        logger.info(f"Writing min/max for dekad {self.dekad}...")        
+
+        # Initialize min/max arrays with proper fill values
+        chunk_shape = (chunk.y_end - chunk.y_start, chunk.x_end - chunk.x_start)
+        min_fpar = np.full(
+            chunk_shape, 255, dtype=np.uint8
+        )  # Start with max possible value
+        max_fpar = np.full(
+            chunk_shape, 0, dtype=np.uint8
+        )  # Start with min possible value
+
+        # Process each time index individually to save memory
+        for idx in relevant_dekad_indices:
+            fpar_slice = fpar_zarr_group["fpar"][
+                idx,
+                chunk.y_start : chunk.y_end,
+                chunk.x_start : chunk.x_end,
+            ]
+
+            # Only update where we have valid data (not fill value)
+            valid_mask = fpar_slice != 255
+            min_fpar = np.where(
+                valid_mask & (fpar_slice < min_fpar), fpar_slice, min_fpar
+            )
+            max_fpar = np.where(
+                valid_mask & (fpar_slice > max_fpar), fpar_slice, max_fpar
+            )
+
+        # Set fill value where no valid data was found
+        no_data_mask = min_fpar == 255
+        min_fpar[no_data_mask] = FILL_VALUE
+        max_fpar[no_data_mask] = FILL_VALUE
+
+        logger.info(f"Writing min/max for dekad {self.dekad}...")
         min_max_group = zarr.open_group(store=min_max_zarr_store, mode="a")
         min_max_group["min_fpar"][
             self.dekad - 1, chunk.y_start : chunk.y_end, chunk.x_start : chunk.x_end

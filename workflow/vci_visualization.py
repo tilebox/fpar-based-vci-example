@@ -125,7 +125,7 @@ class CreateVciMp4(Task):
                 f"Year array and VCI array have different lengths: {year_array.shape[0]} != {vci_array.shape[0]}"
             )
 
-        context.submit_subtask(
+        create_frames_task = context.submit_subtask(
             CreateVciFrames(
                 slice=(0, vci_array.shape[0]),
                 vci_zarr_path=self.vci_zarr_path,
@@ -133,7 +133,6 @@ class CreateVciMp4(Task):
             )
         )
 
-        create_frames_task = context.submit_subtask(CreateVciFramesByYear())
         create_video_task = context.submit_subtask(
             CreateVideoFromFrames(slice=(0, vci_array.shape[0])),
             depends_on=[create_frames_task],

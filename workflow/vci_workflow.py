@@ -1,9 +1,9 @@
 from tilebox.workflows import Task, ExecutionContext
 from config import ZARR_STORE_PATH
 from ingest import WriteFparToZarr
-from minmax import ComputeMinMaxPerDekad, InitializeMinMaxArrays
-from vci import ComputeVci, InitializeVciArray
-from vci_visualization import CreateVciVideo
+from minmax import ComputeMinMaxPerDekad
+from vci import ComputeVci
+from vci_visualization import CreateVciMp4
 
 
 class VciWorkflow(Task):
@@ -35,12 +35,12 @@ class VciWorkflow(Task):
             ),
             depends_on=[min_max_task],
         )
-        # context.submit_subtask(
-        #     CreateVciVideo(
-        #         job_id=self.fpar_datacube_location_uuid,
-        #         time_range=self.time_range,
-        #         downsample_factor=self.video_downsample_factor,
-        #         output_cluster=self.video_output_cluster,
-        #     ),
-        #     depends_on=[vci_task],
-        # )
+        context.submit_subtask(
+            CreateVciMp4(
+                vci_zarr_path=zarr_path,
+                fpar_zarr_path=zarr_path,
+                downsample_factor=self.video_downsample_factor,
+                output_cluster=self.video_output_cluster,
+            ),
+            depends_on=[vci_task],
+        )
