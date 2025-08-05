@@ -257,6 +257,7 @@ class CalculateMinMaxForDekad(Task):
 
         # Process each time index individually to save memory
         for idx in relevant_dekad_indices:
+            fpar_zarr_group = zarr.open_group(store=fpar_zarr_store, mode="r")
             fpar_slice = fpar_zarr_group["fpar"][
                 idx,
                 chunk.y_start : chunk.y_end,
@@ -271,11 +272,9 @@ class CalculateMinMaxForDekad(Task):
             max_fpar = np.where(
                 valid_mask & (fpar_slice > max_fpar), fpar_slice, max_fpar
             )
+            del fpar_slice
+            del fpar_zarr_group
 
-        # Set fill value where no valid data was found
-        no_data_mask = min_fpar == 255
-        min_fpar[no_data_mask] = FILL_VALUE
-        max_fpar[no_data_mask] = FILL_VALUE
 
         logger.info(f"Writing min/max for dekad {self.dekad}...")
         min_max_group = zarr.open_group(store=min_max_zarr_store, mode="a")
