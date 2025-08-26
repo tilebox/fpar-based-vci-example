@@ -13,10 +13,13 @@ class VciWorkflow(Task):
     time_range: str
     video_output_cluster: str | None = None
     video_downsample_factor: int = 20
+    fpar_zarr_path: str = "job_id"
 
     def execute(self, context: ExecutionContext) -> None:
-        # zarr_path = f"{ZARR_STORE_PATH}/0198771f-8498-abce-2857-2c573373fb37/cube.zarr"
-        zarr_path = f"{ZARR_STORE_PATH}/{context.current_task.job.id}/cube.zarr"
+        # Alternative default zarr path, based on initially loaded fpar data cube
+        zarr_path = f"{ZARR_STORE_PATH}/0198771f-8498-abce-2857-2c573373fb37/cube.zarr"
+        if self.fpar_zarr_path == "job_id":
+            zarr_path = f"{ZARR_STORE_PATH}/{context.current_task.job.id}/cube.zarr"
 
         ingestion_task = context.submit_subtask(
             WriteFparToZarr(zarr_path=zarr_path, time_range=self.time_range)
