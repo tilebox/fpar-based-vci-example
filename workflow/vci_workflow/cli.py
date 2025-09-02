@@ -12,11 +12,11 @@ from datetime import datetime
 from tilebox.workflows import Client as WorkflowsClient
 from tilebox.workflows import ExecutionContext, Task
 
-from vci_workflow.config import ZARR_STORE_PATH
 from vci_workflow.ingest import WriteFparToZarr
-from vci_workflow.minmax import ComputeMinMaxPerDekad
+from vci_workflow.minmax import CalculateMinMaxPerDekad
 from vci_workflow.vci import ComputeVci
 from vci_workflow.vci_visualization import CreateVciMp4
+from vci_workflow.zarr import ZARR_STORE_PATH
 
 
 class FparIngestionWorkflow(Task):
@@ -37,7 +37,7 @@ class MinMaxWorkflow(Task):
 
     def execute(self, context: ExecutionContext) -> None:
         context.submit_subtask(
-            ComputeMinMaxPerDekad(
+            CalculateMinMaxPerDekad(
                 fpar_zarr_path=self.fpar_zarr_path,
                 min_max_zarr_path=self.min_max_zarr_path,
             )
@@ -155,10 +155,10 @@ Examples:
   %(prog)s end-to-end --time-range "2022-01-01/2022-12-31"
   
   # Individual steps (manual chaining)
-  %(prog)s ingest --time-range "2022-01-01/2022-12-31" --fpar-zarr-path "gs://bucket/cube.zarr"
-  %(prog)s minmax --fpar-zarr-path "gs://bucket/cube.zarr" --min-max-zarr-path "gs://bucket/minmax.zarr"
-  %(prog)s vci --fpar-zarr-path "gs://bucket/cube.zarr" --min-max-zarr-path "gs://bucket/minmax.zarr" --vci-zarr-path "gs://bucket/vci.zarr"
-  %(prog)s video --vci-zarr-path "gs://bucket/vci.zarr" --fpar-zarr-path "gs://bucket/cube.zarr"
+  %(prog)s ingest --time-range "2022-01-01/2022-12-31" --fpar-zarr-path "path/to/fpar.zarr"
+  %(prog)s minmax --fpar-zarr-path "path/to/fpar.zarr" --min-max-zarr-path "path/to/minmax.zarr"
+  %(prog)s vci --fpar-zarr-path "path/to/fpar.zarr" --min-max-zarr-path "path/to/minmax.zarr" --vci-zarr-path "path/to/vci.zarr"
+  %(prog)s video --vci-zarr-path "path/to/vci.zarr" --fpar-zarr-path "path/to/fpar.zarr"
         """,
     )
 

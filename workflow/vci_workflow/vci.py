@@ -7,8 +7,7 @@ from tilebox.workflows import ExecutionContext, Task  # type: ignore[import-unty
 from tilebox.workflows.observability.logging import get_logger  # type: ignore[import-untyped]
 
 from vci_workflow.chunks import SpatialChunk
-from vci_workflow.config import COMPRESSOR, HEIGHT, HEIGHT_CHUNK, WIDTH, WIDTH_CHUNK
-from vci_workflow.zarr_helpers import open_zarr_group
+from vci_workflow.zarr import COMPRESSOR, HEIGHT, HEIGHT_CHUNK, WIDTH, WIDTH_CHUNK, open_zarr_group
 
 
 class ComputeVci(Task):

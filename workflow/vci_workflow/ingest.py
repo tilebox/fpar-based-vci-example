@@ -11,7 +11,8 @@ from tilebox.datasets import Client as DatasetsClient
 from tilebox.workflows import ExecutionContext, Task
 from tilebox.workflows.observability.logging import get_logger
 
-from vci_workflow.config import (
+from vci_workflow.memory_logger import MemoryLogger
+from vci_workflow.zarr import (
     COMPRESSOR,
     FILL_VALUE,
     HEIGHT,
@@ -19,9 +20,9 @@ from vci_workflow.config import (
     TIME_CHUNK,
     WIDTH,
     WIDTH_CHUNK,
+    open_zarr_group,
+    open_zarr_store,
 )
-from vci_workflow.memory_logger import MemoryLogger
-from vci_workflow.zarr_helpers import open_zarr_group, open_zarr_store
 
 logger = get_logger()
 memory_logger = MemoryLogger()

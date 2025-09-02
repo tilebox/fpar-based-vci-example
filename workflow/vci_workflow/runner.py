@@ -20,7 +20,6 @@ from vci_workflow.cli import (
     VciCalculationWorkflow,
     VciVideoWorkflow,
 )
-from vci_workflow.config import GCS_BUCKET
 from vci_workflow.ingest import (
     InitializeZarrStore,
     LoadDekadIntoZarr,
@@ -28,13 +27,15 @@ from vci_workflow.ingest import (
     WriteFparToZarr,
 )
 from vci_workflow.minmax import (
+    CalculateMinMaxForChunk,
     CalculateMinMaxForDekad,
-    ComputeMinMaxPerDekad,
+    CalculateMinMaxForFullDataset,
+    CalculateMinMaxPerDekad,
     InitializeMinMaxArrays,
-    OrchestrateDekadMinMaxCalculation,
 )
 from vci_workflow.vci import CalculateVciDekad, ComputeVci, ComputeVciSlice, InitializeVciArray
 from vci_workflow.vci_visualization import CreateSingleVciFrame, CreateVciFrames, CreateVciMp4, CreateVideoFromFrames
+from vci_workflow.zarr import GCS_BUCKET
 
 if __name__ == "__main__":
     # Load environment variables from .env file
@@ -68,14 +69,15 @@ if __name__ == "__main__":
             ComputeVciSlice,
             InitializeZarrStore,
             LoadDekadIntoZarr,
-            ComputeMinMaxPerDekad,
             WriteFparToZarr,
             WriteFparDataIntoEmptyZarr,
             InitializeMinMaxArrays,
             InitializeVciArray,
             CalculateVciDekad,
+            CalculateMinMaxPerDekad,
             CalculateMinMaxForDekad,
-            OrchestrateDekadMinMaxCalculation,
+            CalculateMinMaxForChunk,
+            CalculateMinMaxForFullDataset,
             CreateVciMp4,
             CreateVciFrames,
             CreateSingleVciFrame,
