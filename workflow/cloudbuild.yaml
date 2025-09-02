@@ -1,63 +1,55 @@
 options:
   # Use high-performance machine for faster builds
-  machineType: 'E2_HIGHCPU_8'
+  machineType: "E2_HIGHCPU_8"
   # Enable Docker layer caching
   env:
-    - 'DOCKER_BUILDKIT=1'
+    - "DOCKER_BUILDKIT=1"
 
 steps:
   # 1. Pull multiple cache sources in parallel for better cache hit rates
-  - name: 'gcr.io/cloud-builders/docker'
-    entrypoint: 'bash'
+  - name: "gcr.io/cloud-builders/docker"
+    entrypoint: "bash"
     args:
-      - '-c'
+      - "-c"
       - |
-        # Pull latest and base/deps stages for multi-stage cache
-        docker pull eu.gcr.io/$PROJECT_ID/vci-runners/workflow-runner:latest || true &
-        docker pull eu.gcr.io/$PROJECT_ID/vci-runners/workflow-runner:base || true &
-        docker pull eu.gcr.io/$PROJECT_ID/vci-runners/workflow-runner:deps || true &
+        # Pull latest stage for cache (remove base/deps as they're not built as separate targets)
+        docker pull europe-west4-docker.pkg.dev/$PROJECT_ID/vci-runners/workflow-runner:latest || true &
         wait
 
   # 2. Build with BuildKit and multi-stage caching for maximum speed
-  - name: 'gcr.io/cloud-builders/docker'
+  - name: "gcr.io/cloud-builders/docker"
     env:
-      - 'DOCKER_BUILDKIT=1'
+      - "DOCKER_BUILDKIT=1"
     args:
-      - 'build'
-      - '-t'
-      - 'eu.gcr.io/$PROJECT_ID/vci-runners/workflow-runner:${_CODE_HASH}'
-      - '--target'
-      - 'runtime'
-      - '--cache-from'
-      - 'eu.gcr.io/$PROJECT_ID/vci-runners/workflow-runner:latest'
-      - '--cache-from'
-      - 'eu.gcr.io/$PROJECT_ID/vci-runners/workflow-runner:base'
-      - '--cache-from'
-      - 'eu.gcr.io/$PROJECT_ID/vci-runners/workflow-runner:deps'
-      - '--build-arg'
-      - 'BUILDKIT_INLINE_CACHE=1'
-      - '.'
+      - "build"
+      - "-t"
+      - "europe-west4-docker.pkg.dev/$PROJECT_ID/vci-runners/workflow-runner:${_CODE_HASH}"
+      - "--cache-from"
+      - "europe-west4-docker.pkg.dev/$PROJECT_ID/vci-runners/workflow-runner:latest"
+      - "--build-arg"
+      - "BUILDKIT_INLINE_CACHE=1"
+      - "."
 
   # 3. Push main image and intermediate stages in parallel
-  - name: 'gcr.io/cloud-builders/docker'
-    entrypoint: 'bash'
+  - name: "gcr.io/cloud-builders/docker"
+    entrypoint: "bash"
     args:
-      - '-c'
+      - "-c"
       - |
         # Push main image
-        docker push eu.gcr.io/$PROJECT_ID/vci-runners/workflow-runner:${_CODE_HASH} &
+        docker push europe-west4-docker.pkg.dev/$PROJECT_ID/vci-runners/workflow-runner:${_CODE_HASH} &
 
-        # Tag and push intermediate stages for future cache
-        docker tag eu.gcr.io/$PROJECT_ID/vci-runners/workflow-runner:${_CODE_HASH} eu.gcr.io/$PROJECT_ID/vci-runners/workflow-runner:latest
-        docker push eu.gcr.io/$PROJECT_ID/vci-runners/workflow-runner:latest &
+        # Tag and push latest for future cache
+        docker tag europe-west4-docker.pkg.dev/$PROJECT_ID/vci-runners/workflow-runner:${_CODE_HASH} europe-west4-docker.pkg.dev/$PROJECT_ID/vci-runners/workflow-runner:latest
+        docker push europe-west4-docker.pkg.dev/$PROJECT_ID/vci-runners/workflow-runner:latest &
 
         # Wait for all pushes to complete
         wait
 
 # Tell Cloud Build which images to push to the registry upon completion.
 images:
-  - 'eu.gcr.io/$PROJECT_ID/vci-runners/workflow-runner:${_CODE_HASH}'
-  - 'eu.gcr.io/$PROJECT_ID/vci-runners/workflow-runner:latest'
+  - "europe-west4-docker.pkg.dev/$PROJECT_ID/vci-runners/workflow-runner:${_CODE_HASH}"
+  - "europe-west4-docker.pkg.dev/$PROJECT_ID/vci-runners/workflow-runner:latest"
 
 # Set timeout for faster feedback on failures
-timeout: '600s'  # 10 minutes max
+timeout: "600s" # 10 minutes max

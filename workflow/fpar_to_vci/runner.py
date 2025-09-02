@@ -1,23 +1,33 @@
 import os
 import socket
 
+from dotenv import load_dotenv  # type: ignore[import-untyped]
 from google.cloud.storage import Client as StorageClient  # type: ignore[import-untyped]
-from tilebox.workflows import Client as WorkflowsClient  # type: ignore[import-untyped]
-from tilebox.workflows.cache import GoogleStorageCache  # type: ignore[import-untyped]
 
-from config import GCS_BUCKET
-from ingest import (
-    LoadDekadIntoZarr,
-    InitializeZarrStore,
-    WriteFparToZarr,
-    WriteFparDataIntoEmptyZarr,
+from fpar_to_vci.cli import (
+    EndToEndVciWorkflow,
+    FparIngestionWorkflow,
+    MinMaxWorkflow,
+    VciCalculationWorkflow,
+    VciVideoWorkflow,
 )
-from minmax import (
-    ComputeMinMaxPerDekad,
+from fpar_to_vci.config import GCS_BUCKET
+from fpar_to_vci.ingest import (
+    InitializeZarrStore,
+    LoadDekadIntoZarr,
+    WriteFparDataIntoEmptyZarr,
+    WriteFparToZarr,
+)
+from fpar_to_vci.minmax import (
     CalculateMinMaxForDekad,
+    ComputeMinMaxPerDekad,
     InitializeMinMaxArrays,
     OrchestrateDekadMinMaxCalculation,
 )
+from fpar_to_vci.vci import CalculateVciDekad, ComputeVci, ComputeVciSlice, InitializeVciArray
+from fpar_to_vci.vci_visualization import CreateSingleVciFrame, CreateVciFrames, CreateVciMp4, CreateVideoFromFrames
+from tilebox.workflows import Client as WorkflowsClient  # type: ignore[import-untyped]
+from tilebox.workflows.cache import GoogleStorageCache  # type: ignore[import-untyped]
 from tilebox.workflows.observability.logging import (  # type: ignore[import-untyped]
     configure_console_logging,
     configure_otel_logging_axiom,
@@ -25,17 +35,11 @@ from tilebox.workflows.observability.logging import (  # type: ignore[import-unt
 from tilebox.workflows.observability.tracing import (  # type: ignore[import-untyped]
     configure_otel_tracing_axiom,
 )
-from vci import CalculateVciDekad, InitializeVciArray, ComputeVciSlice, ComputeVci
-from vci_visualization import (
-    CreateSingleVciFrame,
-    CreateVideoFromFrames,
-    CreateVciMp4,
-    CreateVciFrames,
-    DownloadVideoFromCache,
-)
-from vci_workflow import VciWorkflow
 
 if __name__ == "__main__":
+    # Load environment variables from .env file
+    load_dotenv()
+
     # Configure logging backends
     configure_console_logging()
     configure_otel_logging_axiom(f"{socket.gethostname()}-{os.getpid()}")
@@ -55,7 +59,11 @@ if __name__ == "__main__":
     client = WorkflowsClient()
     runner = client.runner(
         tasks=[
-            VciWorkflow,
+            EndToEndVciWorkflow,
+            FparIngestionWorkflow,
+            MinMaxWorkflow,
+            VciCalculationWorkflow,
+            VciVideoWorkflow,
             ComputeVci,
             ComputeVciSlice,
             InitializeZarrStore,
@@ -72,7 +80,6 @@ if __name__ == "__main__":
             CreateVciFrames,
             CreateSingleVciFrame,
             CreateVideoFromFrames,
-            DownloadVideoFromCache,
         ],
         cache=cache,
         cluster=cluster,

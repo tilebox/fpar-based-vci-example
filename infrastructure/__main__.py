@@ -42,7 +42,7 @@ infra_config = pulumi.Config("vci-infrastructure")
 cluster_enabled = infra_config.require_bool("cluster_enabled")
 min_replicas_config = infra_config.require_int("min_replicas")
 max_replicas_config = infra_config.get_int("max_replicas") or 10
-machine_type = infra_config.get("machine_type") or "e2-standard-2"
+machine_type = infra_config.get("machine_type") or "e2-standard-4"
 cpu_target = infra_config.get_float("cpu_target") or 0.1
 tilebox_cluster = infra_config.get("tilebox_cluster")
 
@@ -129,10 +129,9 @@ gcp.projects.IAMMember(
 workflow_dir = os.path.join(os.path.dirname(__file__), "../workflow")
 code_hash = hash_directory(workflow_dir)
 
-# Use the gcr.io domain for multi-regional pushes. Artifact Registry creates
-# a gcr.io repository wrapper automatically for backward compatibility.
+# Use proper Artifact Registry domain for the repository
 base_image_name = pulumi.Output.concat(
-    "eu.gcr.io/", gcp_project, "/vci-runners/workflow-runner"
+    gcp_region, "-docker.pkg.dev/", gcp_project, "/vci-runners/workflow-runner"
 )
 image_name_with_tag = pulumi.Output.concat(base_image_name, ":", code_hash)
 
@@ -179,6 +178,32 @@ nat = gcp.compute.RouterNat(
 )
 
 
+# --- Storage ---
+
+# Create a GCS bucket to store the Zarr datacube
+bucket = gcp.storage.Bucket(
+    "vci-datacube-bucket",
+    location=gcp_region,
+    project=gcp_project,
+    uniform_bucket_level_access=True,
+    storage_class="STANDARD",
+    versioning=gcp.storage.BucketVersioningArgs(
+        enabled=False,
+    ),
+    lifecycle_rules=[
+        gcp.storage.BucketLifecycleRuleArgs(
+            action=gcp.storage.BucketLifecycleRuleActionArgs(
+                type="Delete",
+            ),
+            condition=gcp.storage.BucketLifecycleRuleConditionArgs(
+                age=30,  # Automatically delete objects older than 30 days
+            ),
+        )
+    ],
+    opts=pulumi.ResourceOptions(depends_on=[storage_api]),
+)
+
+
 # --- Compute ---
 
 # Define the Instance Template for the MIG
@@ -215,6 +240,14 @@ instance_template = gcp.compute.InstanceTemplate(
             "      value: '",
             tilebox_cluster,
             "'\n",
+            "    - name: GCS_BUCKET\n",
+            "      value: '",
+            bucket.name,
+            "'\n",
+            "    - name: ZARR_STORE_PATH\n",
+            "      value: 'gs://",
+            bucket.name,
+            "'\n",
             "    stdin: false\n",
             "    tty: false\n",
             "  restartPolicy: Always\n",
@@ -244,7 +277,9 @@ instance_template = gcp.compute.InstanceTemplate(
         automatic_restart=False,
         on_host_maintenance="TERMINATE",
     ),
-    opts=pulumi.ResourceOptions(depends_on=[compute_api, runner_sa, cloud_build]),
+    opts=pulumi.ResourceOptions(
+        depends_on=[compute_api, runner_sa, cloud_build, bucket]
+    ),
 )
 
 
@@ -262,8 +297,8 @@ mig = gcp.compute.RegionInstanceGroupManager(
     update_policy=gcp.compute.RegionInstanceGroupManagerUpdatePolicyArgs(
         type="PROACTIVE",
         minimal_action="REPLACE",
-        # For a regional MIG, maxSurge must be at least the number of zones.
-        max_surge_fixed=3,
+        # Increase surge for faster rollouts
+        max_surge_fixed=10,
         max_unavailable_fixed=0,
     ),
     opts=pulumi.ResourceOptions(depends_on=[instance_template]),
@@ -299,29 +334,6 @@ autoscaler = gcp.compute.RegionAutoscaler(
         ),
     ),
     opts=pulumi.ResourceOptions(depends_on=[mig]),
-)
-
-# Create a GCS bucket to store the Zarr datacube
-bucket = gcp.storage.Bucket(
-    "vci-datacube-bucket",
-    location=gcp_region,
-    project=gcp_project,
-    uniform_bucket_level_access=True,
-    storage_class="STANDARD",
-    versioning=gcp.storage.BucketVersioningArgs(
-        enabled=False,
-    ),
-    lifecycle_rules=[
-        gcp.storage.BucketLifecycleRuleArgs(
-            action=gcp.storage.BucketLifecycleRuleActionArgs(
-                type="Delete",
-            ),
-            condition=gcp.storage.BucketLifecycleRuleConditionArgs(
-                age=30,  # Automatically delete objects older than 30 days
-            ),
-        )
-    ],
-    opts=pulumi.ResourceOptions(depends_on=[storage_api]),
 )
 
 # --- Exports ---

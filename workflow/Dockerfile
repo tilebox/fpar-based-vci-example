@@ -1,5 +1,5 @@
-# Multi-stage build for better caching and smaller final image
-FROM python:3.13-slim as base
+FROM python:3.12-slim
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 # Install system dependencies in a separate layer for better caching
 RUN apt-get update && apt-get install -y \
@@ -8,13 +8,9 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
-# Install uv in base layer
-RUN pip install --no-cache-dir uv
 
-# Dependencies stage - this will be cached unless dependencies change
-FROM base as deps
+# Sync dependencies
 WORKDIR /app
-
 # Copy only dependency files for maximum cache efficiency
 COPY pyproject.toml uv.lock ./
 
@@ -22,8 +18,7 @@ COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev
 
-# Final stage - copy code and set up runtime
-FROM deps as runtime
+# Copy our code 
 WORKDIR /app
 
 # Copy application code (this layer rebuilds on code changes)

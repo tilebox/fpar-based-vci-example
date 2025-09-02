@@ -1,31 +1,22 @@
 from datetime import datetime
 
+from zarr.codecs import BloscCodec
+
 # --- Constants ---
 GCS_BUCKET = "vci-datacube-bucket-1513742"
 ZARR_STORE_PATH = "vci_fpar.zarr"
-DATASET_ID = "tilebox.modis_fpar"
-MODIS_COLLECTION = "MODIS"
-VIIRS_COLLECTION = "VIIRS"
-VIIRS_START_DATE = datetime(2023, 1, 1)
 FILL_VALUE = 255
-FPAR_NO_DATA_VALUES = (251, 254)  # Specific no-data values from source GeoTIFFs
 START_YEAR_DEKAD = (2000, 15)
-
-# --- Data Search Window ---
-DATA_SEARCH_PRE_DAYS = 1
-DATA_SEARCH_POST_DAYS = 15
 
 # --- Configuration ---
 WIDTH = 80640
 HEIGHT = 29346
 TIME_CHUNK = 1
-HEIGHT_CHUNK = 8192
-WIDTH_CHUNK = 8192
+HEIGHT_CHUNK = 4096
+WIDTH_CHUNK = 4096
 
-from zarr.codecs import BloscCodec
+
 COMPRESSOR = BloscCodec(cname="lz4hc", clevel=5, shuffle="shuffle")
-
-
 
 
 def _calc_time_index(year: int, dekad: int, start_year: int, start_dekad: int) -> int:

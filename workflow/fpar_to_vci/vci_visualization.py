@@ -1,8 +1,9 @@
-from functools import lru_cache
 import os
-import pickle
+import shutil
 import subprocess
-from datetime import datetime
+import tempfile
+from functools import lru_cache
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
@@ -13,22 +14,13 @@ from obstore.auth.google import GoogleCredentialProvider
 from obstore.store import GCSStore
 from PIL import Image, ImageDraw, ImageFont
 from PIL.Image import Image as ImageFile
-from tilebox.workflows import ExecutionContext, Task  # type: ignore[import-untyped]
-from tilebox.workflows.cache import JobCache
-from tilebox.workflows.observability.logging import get_logger  # type: ignore[import-untyped]
-import zarr
-from zarr.storage import ObjectStore as ZarrObjectStore
 
-from config import (
-    GCS_BUCKET,
-    ZARR_STORE_PATH,
-    _calc_time_index,
-    _calc_year_dekad_from_time_index,
-)
-from utils import from_param_or_cache
+from fpar_to_vci.config import GCS_BUCKET, _calc_year_dekad_from_time_index
+from fpar_to_vci.zarr_helpers import open_zarr_group
+from tilebox.workflows import ExecutionContext, Task
+from tilebox.workflows.observability.logging import get_logger
 
 
-@lru_cache
 def assets_store() -> GCSStore:
     return GCSStore(
         bucket=GCS_BUCKET,
@@ -38,17 +30,12 @@ def assets_store() -> GCSStore:
 
 
 @lru_cache
-def get_font(size: int = 24, style="Regular") -> Any:
+def get_font(size: int = 24, style: str = "Regular") -> Any:
     """Get a font for text rendering with system-specific fallbacks."""
     local = Path(f"Poppins-{style}.ttf")
     if not local.exists():
-        assets_store = GCSStore(
-            bucket=GCS_BUCKET,
-            prefix="assets",
-            credential_provider=GoogleCredentialProvider(),
-        )
         with local.open("wb") as f:
-            f.write(memoryview(assets_store.get(str(local)).bytes()))
+            f.write(memoryview(assets_store().get(str(local)).bytes()))
 
     try:
         return ImageFont.truetype(str(local.absolute()), size)
@@ -61,17 +48,11 @@ def get_logo(scale: float = 0.7) -> Any:
     """Get a font for text rendering with system-specific fallbacks."""
     local = Path("tilebox-logo.png")
     if not local.exists():
-        assets_store = GCSStore(
-            bucket=GCS_BUCKET,
-            prefix="assets",
-            credential_provider=GoogleCredentialProvider(),
-        )
         with local.open("wb") as f:
-            f.write(memoryview(assets_store.get(str(local)).bytes()))
+            f.write(memoryview(assets_store().get(str(local)).bytes()))
 
     logo: ImageFile = Image.open(str(local))
-    logo = logo.resize((int(logo.size[0] * scale), int(logo.size[1] * scale)))
-    return logo
+    return logo.resize((int(logo.size[0] * scale), int(logo.size[1] * scale)))
 
 
 class CreateVciMp4(Task):
@@ -86,61 +67,37 @@ class CreateVciMp4(Task):
         logger = get_logger()
         logger.info("Starting VCI MP4 video creation...")
 
-        # from_param_or_cache(self.job_id, context.job_cache, "job_id")
-        # from_param_or_cache(
-        #     self.downsample_factor, context.job_cache, "downsample_factor", default=20
-        # )
-        # time_range_str = from_param_or_cache(
-        #     self.time_range, context.job_cache, "time_range_str", default=None
-        # )
+        logger.info("Start VCI MP4 creation")
 
-        # Convert datetime range to time indices
+        # Open zarr groups using helper
+        vci_group = open_zarr_group(self.vci_zarr_path)
+        vci_array = vci_group["vci"]  # type: ignore[index]
 
-        # open zarr
-        object_store = GCSStore(
-            bucket=GCS_BUCKET,
-            prefix=self.vci_zarr_path,
-            credential_provider=GoogleCredentialProvider(),
-        )
-        zarr_store = ZarrObjectStore(object_store)
-        vci_group = zarr.open_group(store=zarr_store, mode="r")
-        vci_array = vci_group["vci"]
+        fpar_group = open_zarr_group(self.fpar_zarr_path)
+        dekad_array = fpar_group["dekad"]  # type: ignore[index]
+        year_array = fpar_group["year"]  # type: ignore[index]
 
-        object_store = GCSStore(
-            bucket=GCS_BUCKET,
-            prefix=self.fpar_zarr_path,
-            credential_provider=GoogleCredentialProvider(),
-        )
-        fpar_zarr_store = ZarrObjectStore(object_store)
-        fpar_group = zarr.open_group(store=fpar_zarr_store, mode="r")
-        dekad_array = fpar_group["dekad"]
-        year_array = fpar_group["year"]
-
-        if year_array.shape[0] != dekad_array.shape[0]:
+        # Validate array shapes
+        if year_array.shape[0] != dekad_array.shape[0]:  # type: ignore[union-attr]
             raise ValueError(
-                f"Year and dekad arrays have different lengths: {year_array.shape[0]} != {dekad_array.shape[0]}"
+                f"Year and dekad arrays have different lengths: {year_array.shape[0]} != {dekad_array.shape[0]}"  # type: ignore[union-attr]
             )
-        if year_array.shape[0] != vci_array.shape[0]:
+        if year_array.shape[0] != vci_array.shape[0]:  # type: ignore[union-attr]
             raise ValueError(
-                f"Year array and VCI array have different lengths: {year_array.shape[0]} != {vci_array.shape[0]}"
+                f"Year array and VCI array have different lengths: {year_array.shape[0]} != {vci_array.shape[0]}"  # type: ignore[union-attr]
             )
 
         create_frames_task = context.submit_subtask(
             CreateVciFrames(
-                slice=(0, vci_array.shape[0]),
+                slice=(0, vci_array.shape[0]),  # type: ignore[union-attr]
                 vci_zarr_path=self.vci_zarr_path,
                 fpar_zarr_path=self.fpar_zarr_path,
             )
         )
 
-        create_video_task = context.submit_subtask(
-            CreateVideoFromFrames(slice=(0, vci_array.shape[0])),
-            depends_on=[create_frames_task],
-        )
         context.submit_subtask(
-            DownloadVideoFromCache(),
-            depends_on=[create_video_task],
-            cluster=self.output_cluster,
+            CreateVideoFromFrames(slice=(0, vci_array.shape[0])),  # type: ignore[union-attr]
+            depends_on=[create_frames_task],
         )
 
 
@@ -197,34 +154,26 @@ class CreateSingleVciFrame(Task):
         logger = get_logger()
         logger.info(f"Creating VCI frame for time index {self.time_index}")
 
-        object_store = GCSStore(
-            bucket=GCS_BUCKET,
-            prefix=self.vci_zarr_path,
-            credential_provider=GoogleCredentialProvider(),
-        )
-        zarr_store = ZarrObjectStore(object_store)
-        ds = xr.open_zarr(zarr_store, consolidated=False)
+        logger.info(f"Frame {self.time_index} start")
+
+        # Open VCI zarr group using helper and load data with xarray
+        vci_group = open_zarr_group(self.vci_zarr_path)
+        ds = xr.open_zarr(vci_group.store, consolidated=False)
         vci_array = ds["vci"]
 
-        vci_slice = vci_array[
-            self.time_index, :: self.downsample_factor, :: self.downsample_factor
-        ]
+        vci_slice = vci_array[self.time_index, :: self.downsample_factor, :: self.downsample_factor]
         vci_data = vci_slice.compute()
 
-        object_store = GCSStore(
-            bucket=GCS_BUCKET,
-            prefix=self.fpar_zarr_path,
-            credential_provider=GoogleCredentialProvider(),
-        )
-        fpar_zarr_store = ZarrObjectStore(object_store)
-        fpar_group = zarr.open_group(store=fpar_zarr_store, mode="r")
-        dekad_array = fpar_group["dekad"]
-        year_array = fpar_group["year"]
+        # Open FPAR zarr group using helper
+        fpar_group = open_zarr_group(self.fpar_zarr_path)
+        dekad_array = fpar_group["dekad"]  # type: ignore[index]
+        year_array = fpar_group["year"]  # type: ignore[index]
 
-        start_year_dekad = (year_array[0].item(), dekad_array[0].item())
+        start_year_dekad = (year_array[0].item(), dekad_array[0].item())  # type: ignore[union-attr]
 
         self._create_frame_image(vci_data, self.time_index, start_year_dekad, context)
 
+        logger.info(f"Frame {self.time_index} complete")
         logger.info(f"Created frame {self.time_index} in cache")
 
     def _create_frame_image(
@@ -251,9 +200,7 @@ class CreateSingleVciFrame(Task):
             logo = get_logo(scale=0.6)
             # paste the logo into the bottom right corner
             logo_padding = 80
-            final_image.alpha_composite(
-                logo, (logo_padding, height - logo.height - logo_padding)
-            )
+            final_image.alpha_composite(logo, (logo_padding, height - logo.height - logo_padding))
         except Exception as e:
             logger = get_logger()
             logger.warning(f"Could not add logo: {e}")
@@ -279,9 +226,7 @@ class CreateSingleVciFrame(Task):
             draw.rectangle(bg_bbox, fill=(255, 255, 255, 200))
             draw.text((text_x, text_y), text, fill=(0, 0, 0), font=font)
 
-        _draw_centered_text(
-            f"{year} D{dekad:02d}", y_from_bottom=60, font=get_font(40, "Bold")
-        )
+        _draw_centered_text(f"{year} D{dekad:02d}", y_from_bottom=60, font=get_font(40, "Bold"))
         _draw_centered_text(
             "Vegetation Condition Index",
             y_from_bottom=180,
@@ -294,10 +239,7 @@ class CreateSingleVciFrame(Task):
         )
 
         frame_filename = f"vci_frame_{time_idx:04d}.png"
-
-        final_image = final_image.convert("RGB")  # remove alpha channel
-
-        from io import BytesIO
+        final_image = final_image.convert("RGB")
 
         img_buffer = BytesIO()
         final_image.save(img_buffer, format="PNG")
@@ -320,12 +262,9 @@ class CreateVideoFromFrames(Task):
         logger = get_logger()
         logger.info("Creating MP4 video from frames...")
 
-        frame_paths = []
+        logger.info("Video creation start")
 
         start_idx, end_idx = self.slice
-
-        import tempfile
-
         temp_dir = tempfile.mkdtemp()
         frames_group = context.job_cache.group("vci_frames")
 
@@ -334,6 +273,7 @@ class CreateVideoFromFrames(Task):
 
         logger.info(f"Found {len(frame_keys)} frames in cache")
 
+        frame_paths = []
         for frame_key in frame_keys:
             time_idx = int(frame_key.split("_")[1])
 
@@ -389,7 +329,7 @@ class CreateVideoFromFrames(Task):
             logger.info(f"MP4 stored in cache with key: {video_cache_key}")
             logger.info(f"MP4 size: {len(video_bytes) / 1024 / 1024:.1f} MB")
 
-            import shutil
+            logger.info("Video creation complete")
 
             try:
                 shutil.rmtree(temp_dir)
@@ -404,20 +344,3 @@ class CreateVideoFromFrames(Task):
         except Exception as e:
             logger.error(f"Failed to create MP4: {e}")
             raise
-
-
-class DownloadVideoFromCache(Task):
-    """Downloads the MP4 video from the cache."""
-
-    def execute(self, context: ExecutionContext) -> None:
-        logger = get_logger()
-        logger.info("Downloading MP4 video from cache...")
-
-        video_cache_key = "vci_animation_mp4"
-        if video_cache_key in context.job_cache:
-            video_bytes = context.job_cache[video_cache_key]
-            with open("vci_animation.mp4", "wb") as f:
-                f.write(video_bytes)
-            logger.info("MP4 video downloaded successfully")
-        else:
-            logger.error("MP4 video not found in cache")
