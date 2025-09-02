@@ -16,13 +16,15 @@ COPY pyproject.toml uv.lock ./
 
 # Install dependencies with uv cache for faster rebuilds
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-install-local
+    uv sync --frozen --no-install-local
 
 # Copy our code 
 WORKDIR /app
 
 # Copy application code (this layer rebuilds on code changes)
 COPY . .
+
+RUN uv sync
 
 # Set the command to run the task runner
 CMD ["uv", "run", "--", "python", "-m", "vci_workflow.runner"]
