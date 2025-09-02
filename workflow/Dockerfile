@@ -16,7 +16,7 @@ COPY pyproject.toml uv.lock ./
 
 # Install dependencies with uv cache for faster rebuilds
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev
+    uv sync --frozen --no-dev --no-install-local
 
 # Copy our code 
 WORKDIR /app

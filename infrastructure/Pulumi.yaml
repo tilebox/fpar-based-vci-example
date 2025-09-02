@@ -1,3 +1,7 @@
 name: vci-infrastructure
-runtime: python
+runtime:
+  name: python
+  options:
+    virtualenv: .venv
+    typechecker: pyright
 description: Infrastructure for VCI calculation workflow

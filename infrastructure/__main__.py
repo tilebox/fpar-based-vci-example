@@ -140,7 +140,7 @@ cloud_build = command.local.Command(
     "cloud-build-image",
     create=pulumi.Output.concat(
         "gcloud builds submit ",
-        workflow_dir,
+        str(workflow_dir),
         " --config=",
         str(workflow_dir / "cloudbuild.yaml"),
         " --substitutions=_CODE_HASH=",
