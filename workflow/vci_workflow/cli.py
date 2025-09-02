@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 """
 Modular VCI workflow definitions following Tilebox best practices.
 Each workflow can be run independently or as part of a larger pipeline.
@@ -8,14 +9,14 @@ import argparse
 import sys
 from datetime import datetime
 
-from config import ZARR_STORE_PATH
-from ingest import WriteFparToZarr
-from minmax import ComputeMinMaxPerDekad
-from vci import ComputeVci
-from vci_visualization import CreateVciMp4
-
 from tilebox.workflows import Client as WorkflowsClient
 from tilebox.workflows import ExecutionContext, Task
+
+from vci_workflow.config import ZARR_STORE_PATH
+from vci_workflow.ingest import WriteFparToZarr
+from vci_workflow.minmax import ComputeMinMaxPerDekad
+from vci_workflow.vci import ComputeVci
+from vci_workflow.vci_visualization import CreateVciMp4
 
 
 class FparIngestionWorkflow(Task):
@@ -195,7 +196,7 @@ Examples:
 
     # Common arguments
     for subparser in [end_to_end, ingest, minmax, vci, video]:
-        subparser.add_argument("--job-name", default="vci-workflow")
+        subparser.add_argument("--job-name", default="")
         subparser.add_argument("--cluster", help="Execution cluster")
 
     args = parser.parse_args()
@@ -241,32 +242,20 @@ Examples:
 
     # Generate descriptive job name with timestamp and key parameters
     timestamp = datetime.now().strftime("%Y-%m-%dT%H-%M")
-    if args.workflow == "end-to-end":
-        years = args.time_range.split("/")[0][:4] + "-" + args.time_range.split("/")[1][:4]
-        job_description = f"vci-e2e-{timestamp}--{years}"
-    elif args.workflow == "ingest":
-        years = args.time_range.split("/")[0][:4] + "-" + args.time_range.split("/")[1][:4]
-        job_description = f"vci-ingest-{timestamp}--{years}"
-    elif args.workflow == "minmax":
-        job_description = f"vci-minmax-{timestamp}"
-    elif args.workflow == "vci":
-        job_description = f"vci-calc-{timestamp}"
-    elif args.workflow == "video":
-        job_description = f"vci-video-{timestamp}-ds{args.downsample_factor}"
-    else:
-        job_description = args.job_name
 
-    # Submit the job
-    try:
-        client = WorkflowsClient().jobs()
-        job = client.submit(job_description, task, cluster=args.cluster, max_retries=3)
+    job_name = args.job_name
+    if not job_name:
+        if args.workflow in {"end-to-end", "ingest"}:
+            years = args.time_range.split("/")[0][:4] + "-" + args.time_range.split("/")[1][:4]
+            job_name = f"vci-{args.workflow}-{timestamp}--{years}"
+        else:
+            job_name = f"vci-{args.workflow}-{timestamp}"
 
-        print(f"Successfully submitted {args.workflow} job: {job.id}")
-        print(f"Monitor at: https://console.tilebox.com/workflows/jobs/{job.id}")
+    client = WorkflowsClient().jobs()
+    job = client.submit(job_name, task, cluster=args.cluster, max_retries=3)
 
-    except Exception as e:
-        print(f"Error submitting workflow job: {e}", file=sys.stderr)
-        sys.exit(1)
+    print(f"Successfully submitted {args.workflow} job: {job.id}")  # noqa: T201
+    print(f"Monitor at: https://console.tilebox.com/workflows/jobs/{job.id}")  # noqa: T201
 
 
 if __name__ == "__main__":

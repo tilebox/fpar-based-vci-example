@@ -1,6 +1,5 @@
 from guppy import hpy
 from humanize import naturalsize
-
 from tilebox.workflows.observability.logging import get_logger
 
 logger = get_logger()

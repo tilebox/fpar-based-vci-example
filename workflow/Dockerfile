@@ -25,4 +25,4 @@ WORKDIR /app
 COPY . .
 
 # Set the command to run the task runner
-CMD ["uv", "run", "--", "python", "runner.py"]
+CMD ["uv", "run", "--", "python", "-m", "vci_workflow.runner"]

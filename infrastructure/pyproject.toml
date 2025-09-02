@@ -1,7 +1,7 @@
 [project]
 name = "infrastructure"
 version = "0.1.0"
-description = "Add your description here"
+description = "IaC for an autoscaling Tilebox cluster for the VCI workflow utilizing GCP Spot instances."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
@@ -12,6 +12,4 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = [
-    "mypy>=1.17.0",
-]
+dev = ["pyright>=1.1.404", "ruff>=0.12.7"]

@@ -4,12 +4,12 @@ from dataclasses import field
 
 import numpy as np
 import zarr
-
-from fpar_to_vci.chunks import SpatialChunk
-from fpar_to_vci.config import FILL_VALUE, HEIGHT, HEIGHT_CHUNK, WIDTH, WIDTH_CHUNK
-from fpar_to_vci.zarr_helpers import open_zarr_group
 from tilebox.workflows import ExecutionContext, Task
 from tilebox.workflows.observability.logging import get_logger
+
+from vci_workflow.chunks import SpatialChunk
+from vci_workflow.config import FILL_VALUE, HEIGHT, HEIGHT_CHUNK, WIDTH, WIDTH_CHUNK
+from vci_workflow.zarr_helpers import open_zarr_group
 
 
 class ComputeMinMaxPerDekad(Task):

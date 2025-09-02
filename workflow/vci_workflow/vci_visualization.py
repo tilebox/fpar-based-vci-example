@@ -14,11 +14,11 @@ from obstore.auth.google import GoogleCredentialProvider
 from obstore.store import GCSStore
 from PIL import Image, ImageDraw, ImageFont
 from PIL.Image import Image as ImageFile
-
-from fpar_to_vci.config import GCS_BUCKET, _calc_year_dekad_from_time_index
-from fpar_to_vci.zarr_helpers import open_zarr_group
 from tilebox.workflows import ExecutionContext, Task
 from tilebox.workflows.observability.logging import get_logger
+
+from vci_workflow.config import GCS_BUCKET, _calc_year_dekad_from_time_index
+from vci_workflow.zarr_helpers import open_zarr_group
 
 
 def assets_store() -> GCSStore:

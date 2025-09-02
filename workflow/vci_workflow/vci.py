@@ -3,12 +3,12 @@ from typing import cast
 
 import numpy as np
 import zarr
-
-from fpar_to_vci.chunks import SpatialChunk
-from fpar_to_vci.config import COMPRESSOR, HEIGHT, HEIGHT_CHUNK, WIDTH, WIDTH_CHUNK
-from fpar_to_vci.zarr_helpers import open_zarr_group
 from tilebox.workflows import ExecutionContext, Task  # type: ignore[import-untyped]
 from tilebox.workflows.observability.logging import get_logger  # type: ignore[import-untyped]
+
+from vci_workflow.chunks import SpatialChunk
+from vci_workflow.config import COMPRESSOR, HEIGHT, HEIGHT_CHUNK, WIDTH, WIDTH_CHUNK
+from vci_workflow.zarr_helpers import open_zarr_group
 
 
 class ComputeVci(Task):

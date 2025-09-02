@@ -6,7 +6,7 @@ from obstore.store import GCSStore
 from zarr.core.common import AccessModeLiteral
 from zarr.storage import ObjectStore as ZarrObjectStore
 
-from fpar_to_vci.config import GCS_BUCKET, ZARR_STORE_PATH
+from vci_workflow.config import GCS_BUCKET, ZARR_STORE_PATH
 
 
 def open_zarr_store(path: str) -> ZarrObjectStore:

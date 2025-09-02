@@ -7,8 +7,11 @@ import numpy as np
 import rasterio
 import xarray as xr
 import zarr
+from tilebox.datasets import Client as DatasetsClient
+from tilebox.workflows import ExecutionContext, Task
+from tilebox.workflows.observability.logging import get_logger
 
-from fpar_to_vci.config import (
+from vci_workflow.config import (
     COMPRESSOR,
     FILL_VALUE,
     HEIGHT,
@@ -17,11 +20,8 @@ from fpar_to_vci.config import (
     WIDTH,
     WIDTH_CHUNK,
 )
-from fpar_to_vci.memory_logger import MemoryLogger
-from fpar_to_vci.zarr_helpers import open_zarr_group, open_zarr_store
-from tilebox.datasets import Client as DatasetsClient
-from tilebox.workflows import ExecutionContext, Task
-from tilebox.workflows.observability.logging import get_logger
+from vci_workflow.memory_logger import MemoryLogger
+from vci_workflow.zarr_helpers import open_zarr_group, open_zarr_store
 
 logger = get_logger()
 memory_logger = MemoryLogger()

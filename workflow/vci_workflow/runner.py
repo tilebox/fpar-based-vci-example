@@ -1,40 +1,40 @@
 import os
 import socket
 
-from dotenv import load_dotenv  # type: ignore[import-untyped]
-from google.cloud.storage import Client as StorageClient  # type: ignore[import-untyped]
+from dotenv import load_dotenv
+from google.cloud.storage import Client as StorageClient
+from tilebox.workflows import Client as WorkflowsClient
+from tilebox.workflows.cache import GoogleStorageCache
+from tilebox.workflows.observability.logging import (
+    configure_console_logging,
+    configure_otel_logging_axiom,
+)
+from tilebox.workflows.observability.tracing import (
+    configure_otel_tracing_axiom,
+)
 
-from fpar_to_vci.cli import (
+from vci_workflow.cli import (
     EndToEndVciWorkflow,
     FparIngestionWorkflow,
     MinMaxWorkflow,
     VciCalculationWorkflow,
     VciVideoWorkflow,
 )
-from fpar_to_vci.config import GCS_BUCKET
-from fpar_to_vci.ingest import (
+from vci_workflow.config import GCS_BUCKET
+from vci_workflow.ingest import (
     InitializeZarrStore,
     LoadDekadIntoZarr,
     WriteFparDataIntoEmptyZarr,
     WriteFparToZarr,
 )
-from fpar_to_vci.minmax import (
+from vci_workflow.minmax import (
     CalculateMinMaxForDekad,
     ComputeMinMaxPerDekad,
     InitializeMinMaxArrays,
     OrchestrateDekadMinMaxCalculation,
 )
-from fpar_to_vci.vci import CalculateVciDekad, ComputeVci, ComputeVciSlice, InitializeVciArray
-from fpar_to_vci.vci_visualization import CreateSingleVciFrame, CreateVciFrames, CreateVciMp4, CreateVideoFromFrames
-from tilebox.workflows import Client as WorkflowsClient  # type: ignore[import-untyped]
-from tilebox.workflows.cache import GoogleStorageCache  # type: ignore[import-untyped]
-from tilebox.workflows.observability.logging import (  # type: ignore[import-untyped]
-    configure_console_logging,
-    configure_otel_logging_axiom,
-)
-from tilebox.workflows.observability.tracing import (  # type: ignore[import-untyped]
-    configure_otel_tracing_axiom,
-)
+from vci_workflow.vci import CalculateVciDekad, ComputeVci, ComputeVciSlice, InitializeVciArray
+from vci_workflow.vci_visualization import CreateSingleVciFrame, CreateVciFrames, CreateVciMp4, CreateVideoFromFrames
 
 if __name__ == "__main__":
     # Load environment variables from .env file

@@ -1,5 +1,6 @@
 import hashlib
 import os
+from pathlib import Path
 
 import pulumi
 import pulumi_command as command
@@ -8,26 +9,28 @@ import pulumi_gcp as gcp
 # --- Helper Function ---
 
 
-def hash_directory(path):
+def hash_directory(directory: Path) -> str:
     """
     Computes a stable SHA256 hash of a directory's contents.
     This is used to generate a unique, content-based tag for the Docker image.
     The build is only triggered if this hash changes.
     """
-    hasher = hashlib.sha256()
-    for root, _, files in os.walk(path):
+    directory_hash = hashlib.sha256()
+    for root, _, files in os.walk(directory):
         for name in sorted(files):
-            file_path = os.path.join(root, name)
-            # Add relative path to hash to account for file moves
-            relative_path = os.path.relpath(file_path, path)
-            hasher.update(relative_path.encode())
-            with open(file_path, "rb") as f:
+            file_path = Path(root) / name
+
+            # Add file names to the hash sum, to account for file moves
+            directory_hash.update(str(file_path.relative_to(directory)).encode())
+
+            with file_path.open("rb") as f:
                 while True:
                     chunk = f.read(4096)
                     if not chunk:
                         break
-                    hasher.update(chunk)
-    return hasher.hexdigest()
+                    directory_hash.update(chunk)
+
+    return directory_hash.hexdigest()
 
 
 # --- Configuration ---
@@ -45,6 +48,8 @@ max_replicas_config = infra_config.get_int("max_replicas") or 10
 machine_type = infra_config.get("machine_type") or "e2-standard-4"
 cpu_target = infra_config.get_float("cpu_target") or 0.1
 tilebox_cluster = infra_config.get("tilebox_cluster")
+if tilebox_cluster is None:
+    raise ValueError("Missing tilebox cluster")
 
 # Get the Tilebox API key from Pulumi secrets
 tilebox_config = pulumi.Config("tilebox")
@@ -62,14 +67,10 @@ axiom_traces_dataset = axiom_config.require("traces_dataset")
 # Enable necessary GCP services declaratively. This makes the Pulumi program
 # self-contained and ensures that it can be run on a fresh GCP project.
 compute_api = gcp.projects.Service("compute-api", service="compute.googleapis.com")
-artifact_registry_api = gcp.projects.Service(
-    "artifact-registry-api", service="artifactregistry.googleapis.com"
-)
+artifact_registry_api = gcp.projects.Service("artifact-registry-api", service="artifactregistry.googleapis.com")
 iam_api = gcp.projects.Service("iam-api", service="iam.googleapis.com")
 storage_api = gcp.projects.Service("storage-api", service="storage.googleapis.com")
-cloud_build_api = gcp.projects.Service(
-    "cloud-build-api", service="cloudbuild.googleapis.com"
-)
+cloud_build_api = gcp.projects.Service("cloud-build-api", service="cloudbuild.googleapis.com")
 
 
 # --- Resources ---
@@ -126,13 +127,12 @@ gcp.projects.IAMMember(
 # --- Cloud Build ---
 
 # Calculate the hash of the workflow code to use as an immutable image tag.
-workflow_dir = os.path.join(os.path.dirname(__file__), "../workflow")
+
+workflow_dir = Path(__file__).parent.parent.absolute() / "workflow"
 code_hash = hash_directory(workflow_dir)
 
 # Use proper Artifact Registry domain for the repository
-base_image_name = pulumi.Output.concat(
-    gcp_region, "-docker.pkg.dev/", gcp_project, "/vci-runners/workflow-runner"
-)
+base_image_name = pulumi.Output.concat(gcp_region, "-docker.pkg.dev/", gcp_project, "/vci-runners/workflow-runner")
 image_name_with_tag = pulumi.Output.concat(base_image_name, ":", code_hash)
 
 # Use a Command resource to trigger Google Cloud Build.
@@ -142,7 +142,7 @@ cloud_build = command.local.Command(
         "gcloud builds submit ",
         workflow_dir,
         " --config=",
-        os.path.join(workflow_dir, "cloudbuild.yaml"),
+        str(workflow_dir / "cloudbuild.yaml"),
         " --substitutions=_CODE_HASH=",
         code_hash,
         " --project=",
@@ -263,9 +263,7 @@ instance_template = gcp.compute.InstanceTemplate(
             boot=True,
         )
     ],
-    network_interfaces=[
-        gcp.compute.InstanceTemplateNetworkInterfaceArgs(network="default")
-    ],
+    network_interfaces=[gcp.compute.InstanceTemplateNetworkInterfaceArgs(network="default")],
     service_account=gcp.compute.InstanceTemplateServiceAccountArgs(
         email=runner_sa.email,
         scopes=["https://www.googleapis.com/auth/cloud-platform"],
@@ -277,9 +275,7 @@ instance_template = gcp.compute.InstanceTemplate(
         automatic_restart=False,
         on_host_maintenance="TERMINATE",
     ),
-    opts=pulumi.ResourceOptions(
-        depends_on=[compute_api, runner_sa, cloud_build, bucket]
-    ),
+    opts=pulumi.ResourceOptions(depends_on=[compute_api, runner_sa, cloud_build, bucket]),
 )
 
 
