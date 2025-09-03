@@ -1,37 +1,9 @@
-import hashlib
-import os
 from pathlib import Path
 
 import pulumi
 import pulumi_command as command
 import pulumi_gcp as gcp
-
-# --- Helper Function ---
-
-
-def hash_directory(directory: Path) -> str:
-    """
-    Computes a stable SHA256 hash of a directory's contents.
-    This is used to generate a unique, content-based tag for the Docker image.
-    The build is only triggered if this hash changes.
-    """
-    directory_hash = hashlib.sha256()
-    for root, _, files in os.walk(directory):
-        for name in sorted(files):
-            file_path = Path(root) / name
-
-            # Add file names to the hash sum, to account for file moves
-            directory_hash.update(str(file_path.relative_to(directory)).encode())
-
-            with file_path.open("rb") as f:
-                while True:
-                    chunk = f.read(4096)
-                    if not chunk:
-                        break
-                    directory_hash.update(chunk)
-
-    return directory_hash.hexdigest()
-
+from dirhash import dirhash
 
 # --- Configuration ---
 
@@ -129,7 +101,7 @@ gcp.projects.IAMMember(
 # Calculate the hash of the workflow code to use as an immutable image tag.
 
 workflow_dir = Path(__file__).parent.parent.absolute() / "workflow"
-code_hash = hash_directory(workflow_dir)
+code_hash = dirhash(workflow_dir, "sha256", match=["*.py", "*.toml", "Dockerfile", "*.md"], ignore=[".venv/*"])
 
 # Use proper Artifact Registry domain for the repository
 base_image_name = pulumi.Output.concat(gcp_region, "-docker.pkg.dev/", gcp_project, "/vci-runners/workflow-runner")

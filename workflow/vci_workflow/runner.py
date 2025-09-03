@@ -17,25 +17,19 @@ from tilebox.workflows.observability.tracing import (
 
 from vci_workflow.cli import (
     EndToEndVciWorkflow,
-    FparIngestionWorkflow,
-    MinMaxWorkflow,
-    VciCalculationWorkflow,
     VciVideoWorkflow,
 )
-from vci_workflow.ingest import (
-    InitializeZarrStore,
+from vci_workflow.tasks.fpar_to_zarr import (
     LoadDekadIntoZarr,
     WriteFparDataIntoEmptyZarr,
     WriteFparToZarr,
 )
-from vci_workflow.minmax import (
-    CalculateMinMaxForChunk,
-    CalculateMinMaxForDekad,
-    CalculateMinMaxForFullDataset,
-    CalculateMinMaxPerDekad,
-    InitializeMinMaxArrays,
+from vci_workflow.tasks.minmax import (
+    ComputeMinMaxForChunk,
+    ComputeMinMaxForDekad,
+    ComputeMinMaxPerDekad,
 )
-from vci_workflow.vci import CalculateVciDekad, ComputeVci, ComputeVciSlice, InitializeVciArray
+from vci_workflow.tasks.vci import ComputeVCI, ComputeVCIForDekad, ComputeVCIRecursively
 from vci_workflow.vci_visualization import CreateSingleVciFrame, CreateVciFrames, CreateVciMp4, CreateVideoFromFrames
 from vci_workflow.zarr import GCS_BUCKET
 
@@ -66,23 +60,16 @@ if __name__ == "__main__":
     runner = client.runner(
         tasks=[
             EndToEndVciWorkflow,
-            FparIngestionWorkflow,
-            MinMaxWorkflow,
-            VciCalculationWorkflow,
             VciVideoWorkflow,
-            ComputeVci,
-            ComputeVciSlice,
-            InitializeZarrStore,
+            ComputeVCI,
+            ComputeVCIRecursively,
+            ComputeVCIForDekad,
             LoadDekadIntoZarr,
             WriteFparToZarr,
             WriteFparDataIntoEmptyZarr,
-            InitializeMinMaxArrays,
-            InitializeVciArray,
-            CalculateVciDekad,
-            CalculateMinMaxPerDekad,
-            CalculateMinMaxForDekad,
-            CalculateMinMaxForChunk,
-            CalculateMinMaxForFullDataset,
+            ComputeMinMaxPerDekad,
+            ComputeMinMaxForDekad,
+            ComputeMinMaxForChunk,
             CreateVciMp4,
             CreateVciFrames,
             CreateSingleVciFrame,
@@ -92,5 +79,5 @@ if __name__ == "__main__":
         cluster=cluster,
     )
 
-    logger.info(f"Starting runner on cluster: {cluster}")
+    logger.info(f"Starting runner on cluster: {runner.tasks_to_run.cluster_slug}")
     runner.run_forever()

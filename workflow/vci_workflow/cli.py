@@ -12,53 +12,11 @@ from datetime import datetime
 from tilebox.workflows import Client as WorkflowsClient
 from tilebox.workflows import ExecutionContext, Task
 
-from vci_workflow.ingest import WriteFparToZarr
-from vci_workflow.minmax import CalculateMinMaxPerDekad
-from vci_workflow.vci import ComputeVci
+from vci_workflow.tasks.fpar_to_zarr import WriteFparToZarr
+from vci_workflow.tasks.minmax import ComputeMinMaxPerDekad
+from vci_workflow.tasks.vci import ComputeVCI
 from vci_workflow.vci_visualization import CreateVciMp4
 from vci_workflow.zarr import ZARR_STORE_PATH
-
-
-class FparIngestionWorkflow(Task):
-    """Standalone workflow for FPAR data ingestion."""
-
-    time_range: str
-    fpar_zarr_path: str
-
-    def execute(self, context: ExecutionContext) -> None:
-        context.submit_subtask(WriteFparToZarr(zarr_path=self.fpar_zarr_path, time_range=self.time_range))
-
-
-class MinMaxWorkflow(Task):
-    """Standalone workflow for min/max calculation."""
-
-    fpar_zarr_path: str
-    min_max_zarr_path: str
-
-    def execute(self, context: ExecutionContext) -> None:
-        context.submit_subtask(
-            CalculateMinMaxPerDekad(
-                fpar_zarr_path=self.fpar_zarr_path,
-                min_max_zarr_path=self.min_max_zarr_path,
-            )
-        )
-
-
-class VciCalculationWorkflow(Task):
-    """Standalone workflow for VCI calculation."""
-
-    fpar_zarr_path: str
-    min_max_zarr_path: str
-    vci_zarr_path: str
-
-    def execute(self, context: ExecutionContext) -> None:
-        context.submit_subtask(
-            ComputeVci(
-                fpar_zarr_path=self.fpar_zarr_path,
-                min_max_zarr_path=self.min_max_zarr_path,
-                vci_zarr_path=self.vci_zarr_path,
-            )
-        )
 
 
 class VciVideoWorkflow(Task):
@@ -109,25 +67,19 @@ class EndToEndVciWorkflow(Task):
         tasks = []
 
         if self.ingest_fpar:
-            ingest_task = context.submit_subtask(
-                FparIngestionWorkflow(time_range=self.time_range, fpar_zarr_path=fpar_path)
-            )
+            ingest_task = context.submit_subtask(WriteFparToZarr(fpar_path, self.time_range))
             tasks.append(ingest_task)
 
         if self.calculate_minmax:
             minmax_task = context.submit_subtask(
-                MinMaxWorkflow(fpar_zarr_path=fpar_path, min_max_zarr_path=minmax_path),
+                ComputeMinMaxPerDekad(fpar_path, minmax_path),
                 depends_on=tasks if self.ingest_fpar else [],
             )
             tasks.append(minmax_task)
 
         if self.calculate_vci:
             vci_task = context.submit_subtask(
-                VciCalculationWorkflow(
-                    fpar_zarr_path=fpar_path,
-                    min_max_zarr_path=minmax_path,
-                    vci_zarr_path=vci_path,
-                ),
+                ComputeVCI(fpar_path, minmax_path, vci_path),
                 depends_on=tasks if self.calculate_minmax else [],
             )
             tasks.append(vci_task)
@@ -217,18 +169,11 @@ Examples:
             create_video=not args.no_create_video,
         )
     elif args.workflow == "ingest":
-        task = FparIngestionWorkflow(time_range=args.time_range, fpar_zarr_path=args.fpar_zarr_path)
+        task = WriteFparToZarr(args.fpar_zarr_path, args.time_range)
     elif args.workflow == "minmax":
-        task = MinMaxWorkflow(
-            fpar_zarr_path=args.fpar_zarr_path,
-            min_max_zarr_path=args.min_max_zarr_path,
-        )
+        task = ComputeMinMaxPerDekad(args.fpar_zarr_path, args.min_max_zarr_path)
     elif args.workflow == "vci":
-        task = VciCalculationWorkflow(
-            fpar_zarr_path=args.fpar_zarr_path,
-            min_max_zarr_path=args.min_max_zarr_path,
-            vci_zarr_path=args.vci_zarr_path,
-        )
+        task = ComputeVCI(args.fpar_zarr_path, args.min_max_zarr_path, args.vci_zarr_path)
     elif args.workflow == "video":
         task = VciVideoWorkflow(
             vci_zarr_path=args.vci_zarr_path,
