@@ -109,7 +109,7 @@ class ZarrArrayToVideo(Task):
                 self.video_array_name,
                 self.coordinates_zarr_path,
                 self.downscale_factors,
-                (0, 6),  # (0, video_array.shape[0]),
+                (0, video_array.shape[0]),
             )
         )
 
@@ -199,6 +199,10 @@ class ExportFrame(Task):
 
         # instead of downsampling immediately to the target resolution, we first sample it a higher resolution and
         # then resize it to the target size using a resampling method. That produces a smoother visual image overall.
+        target_width = image.width // downsize
+        target_width -= target_width % 2  # our ffmpeg video codec requires even image dimensions
+        target_height = image.height // downsize
+        target_height -= target_height % 2  # our ffmpeg video codec requires even image dimensions
         image = image.resize((image.width // downsize, image.height // downsize), resample=Image.Resampling.BICUBIC)
 
         # Paste the Tilebox logo into the bottom left corner
