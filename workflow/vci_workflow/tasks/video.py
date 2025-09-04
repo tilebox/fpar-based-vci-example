@@ -109,7 +109,7 @@ class ZarrArrayToVideo(Task):
                 self.video_array_name,
                 self.coordinates_zarr_path,
                 self.downscale_factors,
-                (0, video_array.shape[0]),
+                (0, 6),  # (0, video_array.shape[0]),
             )
         )
 
@@ -279,7 +279,7 @@ class ExportFrame(Task):
         image.save(img_buffer, format="PNG")
         img_bytes = img_buffer.getvalue()
         # and upload it to the cache
-        frame_key = f"frame_{self.video_array_name}_{self.frame_index:06d}.png"
+        frame_key = f"frame_{self.video_array_name}_{self.frame_index:04d}.png"
         frames_cache = context.job_cache.group("videos").group(self.video_array_name).group("frames")
         frames_cache[frame_key] = img_bytes
         logger.info(f"{self.video_array_name} frame saved to cache: {frame_key}")
