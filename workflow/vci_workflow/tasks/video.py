@@ -203,7 +203,7 @@ class ExportFrame(Task):
         target_width -= target_width % 2  # our ffmpeg video codec requires even image dimensions
         target_height = image.height // downsize
         target_height -= target_height % 2  # our ffmpeg video codec requires even image dimensions
-        image = image.resize((image.width // downsize, image.height // downsize), resample=Image.Resampling.BICUBIC)
+        image = image.resize((target_width, target_height), resample=Image.Resampling.BICUBIC)
 
         # Paste the Tilebox logo into the bottom left corner
         logo = get_logo(scale=0.6)
