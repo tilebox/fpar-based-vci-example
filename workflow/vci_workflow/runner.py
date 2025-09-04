@@ -15,10 +15,7 @@ from tilebox.workflows.observability.tracing import (
     configure_otel_tracing_axiom,
 )
 
-from vci_workflow.cli import (
-    EndToEndVciWorkflow,
-    VciVideoWorkflow,
-)
+from vci_workflow.cli import EndToEndVciWorkflow
 from vci_workflow.tasks.fpar_to_zarr import (
     LoadDekadIntoZarr,
     WriteFparDataIntoEmptyZarr,
@@ -30,7 +27,7 @@ from vci_workflow.tasks.minmax import (
     ComputeMinMaxPerDekad,
 )
 from vci_workflow.tasks.vci import ComputeVCI, ComputeVCIForDekad, ComputeVCIRecursively
-from vci_workflow.vci_visualization import CreateSingleVciFrame, CreateVciFrames, CreateVciMp4, CreateVideoFromFrames
+from vci_workflow.tasks.video import CreateFrames, CreateVideoFromFrames, ExportFrame, ZarrArrayToVideo
 from vci_workflow.zarr import GCS_BUCKET
 
 logger = get_logger()
@@ -60,7 +57,6 @@ if __name__ == "__main__":
     runner = client.runner(
         tasks=[
             EndToEndVciWorkflow,
-            VciVideoWorkflow,
             ComputeVCI,
             ComputeVCIRecursively,
             ComputeVCIForDekad,
@@ -70,9 +66,9 @@ if __name__ == "__main__":
             ComputeMinMaxPerDekad,
             ComputeMinMaxForDekad,
             ComputeMinMaxForChunk,
-            CreateVciMp4,
-            CreateVciFrames,
-            CreateSingleVciFrame,
+            ZarrArrayToVideo,
+            CreateFrames,
+            ExportFrame,
             CreateVideoFromFrames,
         ],
         cache=cache,

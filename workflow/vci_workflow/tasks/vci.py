@@ -73,7 +73,7 @@ class ComputeVCIRecursively(Task):
     def execute(self, context: ExecutionContext) -> None:
         start = self.time_index_range[0]
         end = self.time_index_range[1]
-        n_time = self.time_index_range[1] - self.time_index_range[0]
+        n_time = end - start
         context.current_task.display = f"ComputeVCI[{start}:{end}, :, :]"
 
         if n_time > 4:

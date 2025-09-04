@@ -15,27 +15,8 @@ from tilebox.workflows import ExecutionContext, Task
 from vci_workflow.tasks.fpar_to_zarr import WriteFparToZarr
 from vci_workflow.tasks.minmax import ComputeMinMaxPerDekad
 from vci_workflow.tasks.vci import ComputeVCI
-from vci_workflow.vci_visualization import CreateVciMp4
+from vci_workflow.tasks.video import ZarrArrayToVideo
 from vci_workflow.zarr import ZARR_STORE_PATH
-
-
-class VciVideoWorkflow(Task):
-    """Standalone workflow for VCI video generation."""
-
-    vci_zarr_path: str
-    fpar_zarr_path: str
-    downsample_factor: int = 20
-    output_cluster: str | None = None
-
-    def execute(self, context: ExecutionContext) -> None:
-        context.submit_subtask(
-            CreateVciMp4(
-                vci_zarr_path=self.vci_zarr_path,
-                fpar_zarr_path=self.fpar_zarr_path,
-                downsample_factor=self.downsample_factor,
-                output_cluster=self.output_cluster,
-            )
-        )
 
 
 class EndToEndVciWorkflow(Task):
@@ -46,7 +27,7 @@ class EndToEndVciWorkflow(Task):
 
     time_range: str
     video_output_cluster: str | None = None
-    video_downsample_factor: int = 20
+    video_downscale_factors: tuple[int, int] = (5, 4)
     fpar_zarr_path: str | None = None
     min_max_zarr_path: str | None = None
     vci_zarr_path: str | None = None
@@ -86,11 +67,24 @@ class EndToEndVciWorkflow(Task):
 
         if self.create_video:
             context.submit_subtask(
-                VciVideoWorkflow(
-                    vci_zarr_path=vci_path,
-                    fpar_zarr_path=fpar_path,
-                    downsample_factor=self.video_downsample_factor,
-                    output_cluster=self.video_output_cluster,
+                ZarrArrayToVideo(
+                    video_zarr_path=vci_path,
+                    video_array_name="vci",
+                    coordinates_zarr_path=fpar_path,
+                    downscale_factors=self.video_downscale_factors,
+                    title="VCI",
+                    subtitle="Vegetation Condition Index (Derived from: MODIS/VIIRS FPAR)",
+                ),
+                depends_on=tasks if self.calculate_vci else [],
+            )
+            context.submit_subtask(
+                ZarrArrayToVideo(
+                    video_zarr_path=fpar_path,
+                    video_array_name="fpar",
+                    coordinates_zarr_path=fpar_path,
+                    downscale_factors=self.video_downscale_factors,
+                    title="FPAR (%)",
+                    subtitle="Fraction of absorbed photosynthetically active radiation",
                 ),
                 depends_on=tasks if self.calculate_vci else [],
             )
@@ -110,7 +104,8 @@ Examples:
   %(prog)s ingest --time-range "2022-01-01/2022-12-31" --fpar-zarr-path "path/to/fpar.zarr"
   %(prog)s minmax --fpar-zarr-path "path/to/fpar.zarr" --min-max-zarr-path "path/to/minmax.zarr"
   %(prog)s vci --fpar-zarr-path "path/to/fpar.zarr" --min-max-zarr-path "path/to/minmax.zarr" --vci-zarr-path "path/to/vci.zarr"
-  %(prog)s video --vci-zarr-path "path/to/vci.zarr" --fpar-zarr-path "path/to/fpar.zarr"
+  %(prog)s fpar-video --fpar-zarr-path "path/to/fpar.zarr"
+  %(prog)s vci-video --vci-zarr-path "path/to/vci.zarr" --fpar-zarr-path "path/to/fpar.zarr"
         """,
     )
 
@@ -119,7 +114,8 @@ Examples:
     # End-to-end workflow
     end_to_end = subparsers.add_parser("end-to-end", help="Run complete VCI pipeline")
     end_to_end.add_argument("--time-range", required=True, help="Time range (ISO format)")
-    end_to_end.add_argument("--video-downsample-factor", type=int, default=20)
+    end_to_end.add_argument("--video-downsample-factor", type=int, default=5)
+    end_to_end.add_argument("--video-downsize-factor", type=int, default=4)
     end_to_end.add_argument("--video-output-cluster", type=str)
     end_to_end.add_argument("--no-ingest-fpar", action="store_true")
     end_to_end.add_argument("--no-calculate-minmax", action="store_true")
@@ -140,14 +136,19 @@ Examples:
     vci.add_argument("--min-max-zarr-path", required=True, help="Input min/max zarr path")
     vci.add_argument("--vci-zarr-path", required=True, help="Output VCI zarr path")
 
-    video = subparsers.add_parser("video", help="Video generation only")
-    video.add_argument("--vci-zarr-path", required=True, help="Input VCI zarr path")
-    video.add_argument("--fpar-zarr-path", required=True, help="Input FPAR zarr path")
-    video.add_argument("--downsample-factor", type=int, default=20)
-    video.add_argument("--output-cluster", type=str)
+    fpar_video = subparsers.add_parser("fpar-video", help="FPAR Video generation")
+    fpar_video.add_argument("--fpar-zarr-path", required=True, help="Input FPAR zarr path")
+    fpar_video.add_argument("--downsample-factor", type=int, default=5)
+    fpar_video.add_argument("--downsize-factor", type=int, default=4)
+
+    vci_video = subparsers.add_parser("vci-video", help="VCI Video generation")
+    vci_video.add_argument("--fpar-zarr-path", required=True, help="Input FPAR zarr path, for dekad/year lookup")
+    vci_video.add_argument("--vci-zarr-path", required=True, help="Input VCI zarr path")
+    vci_video.add_argument("--downsample-factor", type=int, default=5)
+    vci_video.add_argument("--downsize-factor", type=int, default=4)
 
     # Common arguments
-    for subparser in [end_to_end, ingest, minmax, vci, video]:
+    for subparser in [end_to_end, ingest, minmax, vci, fpar_video, vci_video]:
         subparser.add_argument("--job-name", default="")
         subparser.add_argument("--cluster", help="Execution cluster")
 
@@ -162,7 +163,7 @@ Examples:
         task = EndToEndVciWorkflow(
             time_range=args.time_range,
             video_output_cluster=args.video_output_cluster,
-            video_downsample_factor=args.video_downsample_factor,
+            video_downscale_factors=(args.video_downsample_factor, args.video_downsize_factor),
             ingest_fpar=not args.no_ingest_fpar,
             calculate_minmax=not args.no_calculate_minmax,
             calculate_vci=not args.no_calculate_vci,
@@ -174,12 +175,23 @@ Examples:
         task = ComputeMinMaxPerDekad(args.fpar_zarr_path, args.min_max_zarr_path)
     elif args.workflow == "vci":
         task = ComputeVCI(args.fpar_zarr_path, args.min_max_zarr_path, args.vci_zarr_path)
-    elif args.workflow == "video":
-        task = VciVideoWorkflow(
-            vci_zarr_path=args.vci_zarr_path,
-            fpar_zarr_path=args.fpar_zarr_path,
-            downsample_factor=args.downsample_factor,
-            output_cluster=args.output_cluster,
+    elif args.workflow == "fpar-video":
+        task = ZarrArrayToVideo(
+            video_zarr_path=args.fpar_zarr_path,
+            video_array_name="fpar",
+            coordinates_zarr_path=args.fpar_zarr_path,
+            downscale_factors=(args.downsample_factor, args.downsize_factor),
+            title="FPAR (%)",
+            subtitle="Fraction of absorbed photosynthetically active radiation",
+        )
+    elif args.workflow == "vci-video":
+        task = ZarrArrayToVideo(
+            video_zarr_path=args.vci_zarr_path,
+            video_array_name="vci",
+            coordinates_zarr_path=args.fpar_zarr_path,
+            downscale_factors=(args.downsample_factor, args.downsize_factor),
+            title="VCI",
+            subtitle="Vegetation Condition Index (Derived from: MODIS/VIIRS FPAR)",
         )
     else:
         parser.print_help()

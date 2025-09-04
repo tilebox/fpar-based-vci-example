@@ -163,7 +163,7 @@ class WriteFparDataIntoEmptyZarr(Task):
 
         start = self.time_index_range[0]
         end = self.time_index_range[1]
-        n_time = self.time_index_range[1] - self.time_index_range[0]
+        n_time = end - start
         context.current_task.display = f"WriteFpar[{start}:{end}, :, :]"
 
         if n_time > 4:  # more than 4 time indices, so recursively split into subtasks

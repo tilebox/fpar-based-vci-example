@@ -7,3 +7,4 @@ workflow/vci_animation.mp4
 *.png
 .env
 .ipynb_checkpoints/
+*.ipynb
