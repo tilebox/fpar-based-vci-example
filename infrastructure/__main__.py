@@ -233,6 +233,7 @@ instance_template = gcp.compute.InstanceTemplate(
             source_image="cos-cloud/cos-stable",
             auto_delete=True,
             boot=True,
+            disk_size_gb=20,
         )
     ],
     network_interfaces=[gcp.compute.InstanceTemplateNetworkInterfaceArgs(network="default")],

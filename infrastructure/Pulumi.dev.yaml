@@ -4,7 +4,7 @@ config:
   tilebox:api_key:
     secure: AAABADskD7fdt7FOSApXJCZIQCpzuZYGoXFAucnXB9+A8xbdrVk+haEnuRirkMoWK1ZhihJbJarRX2oWBZAufUkIwVbX7rN8NPnFmmw70/IsuRZ6Jlx/q7Q=
   vci-infrastructure:cluster_enabled: true
-  vci-infrastructure:min_replicas: "1"
+  vci-infrastructure:min_replicas: "0"
   vci-infrastructure:machine_type: e2-standard-2
   vci-infrastructure:cpu_target: "0.1"
   vci-infrastructure:tilebox_cluster: default-5KV13AeU7HhQMq
@@ -12,4 +12,4 @@ config:
     secure: AAABAGTJHxFCydAqyq+mdQyDQRNY88AqIBqJdpn4trkc+xgUtX8cAAY8CzsMrqeQtRoaxZ/v7ZjFuIGk3ovDwC7adQQxCffykA==
   axiom:logs_dataset: workflow-logs
   axiom:traces_dataset: workflow-traces
-  vci-infrastructure:max_replicas: "30"
+  vci-infrastructure:max_replicas: "10"
