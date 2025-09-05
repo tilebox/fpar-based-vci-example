@@ -17,7 +17,7 @@ class EndToEndFparToVideos(Task):
     def execute(self, context: ExecutionContext) -> None:
         job_id = context.current_task.job.id
 
-        zarr_store = f"fpar_vci_workflow/{job_id}/zarr"
+        zarr_store = f"fpar_vci_workflow/{job_id}/store.zarr"
 
         # we can write all our zarr arrays into the same store:
         fpar_store = zarr_store

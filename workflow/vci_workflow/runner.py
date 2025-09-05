@@ -31,7 +31,7 @@ from vci_workflow.zarr import GCS_BUCKET
 
 logger = get_logger()
 
-def start_runner(cluster: str | None = None) -> None:
+def start_runner(cluster: str | None = None, tilebox_api_key: str | None = None) -> None:
     """Start a Tilebox workflow runner for the FPAR to VCI video workflow.
 
     The runner will run until it is manually stopped, executing tasks as they are submitted.
@@ -40,7 +40,13 @@ def start_runner(cluster: str | None = None) -> None:
 
     Args:
         cluster: Optional Tilebox cluster to start the runner on.
+        tilebox_api_key: A Tilebox API key to use for authentication. If not set, defaults to the TILEBOX_API_KEY
+            environment variable. Go to https://console.tilebox.com/account/api-keys to create one.
     """
+    if tilebox_api_key is None and "TILEBOX_API_KEY" not in os.environ:
+        raise ValueError(
+            "No Tilebox API key provided. Please set the TILEBOX_API_KEY environment variable or pass the --tilebox-api-key argument."
+        )
 
     # Configure logging backends
     configure_console_logging()
@@ -56,7 +62,7 @@ def start_runner(cluster: str | None = None) -> None:
     cache = GoogleStorageCache(gcs_bucket, prefix="vci_workflow_cache")
 
     # Start the runner
-    client = WorkflowsClient()
+    client = WorkflowsClient(token=tilebox_api_key)
     runner = client.runner(
         tasks=[
             # end to end orchestration task
