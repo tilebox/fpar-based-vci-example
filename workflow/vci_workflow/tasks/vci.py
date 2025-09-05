@@ -1,3 +1,7 @@
+"""
+vci contains Tilebox tasks for calculating the Vegetation Condition Index (VCI) from FPAR data that is stored in Zarr format.
+"""
+
 from typing import cast
 
 import numpy as np

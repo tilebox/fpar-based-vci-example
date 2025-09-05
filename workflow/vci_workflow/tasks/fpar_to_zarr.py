@@ -32,7 +32,7 @@ from vci_workflow.zarr import (
 logger = get_logger()
 memory_logger = MemoryLogger()
 
-_TILEBOX_DATASET_SLUG = "tilebox.modis_fpar"
+_TILEBOX_DATASET_SLUG = "open_data.jrc.fpar"
 _MODIS_COLLECTION = "MODIS"
 _VIIRS_COLLECTION = "VIIRS"
 _VIIRS_START_DATE = datetime(2023, 1, 1)

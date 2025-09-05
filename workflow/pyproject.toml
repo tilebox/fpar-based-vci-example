@@ -5,6 +5,7 @@ description = "A Tilebox workflow for calculating the Vegetation Condition Index
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "cyclopts>=3.23.1",
     "guppy3>=3.1.5",
     "humanize>=4.13.0",
     "matplotlib>=3.10.5",

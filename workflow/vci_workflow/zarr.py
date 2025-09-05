@@ -7,7 +7,6 @@ from zarr.storage import ObjectStore as ZarrObjectStore
 
 # --- Constants ---
 GCS_BUCKET = "vci-datacube-bucket-1513742"
-ZARR_STORE_PATH = "vci_fpar.zarr"
 FILL_VALUE = 255
 START_YEAR_DEKAD = (2000, 15)
 
@@ -35,9 +34,3 @@ def open_zarr_store(path: str) -> ZarrObjectStore:
 
 def open_zarr_group(path: str, mode: AccessModeLiteral = "r") -> zarr.Group:
     return zarr.open_group(store=open_zarr_store(path), mode=mode)
-
-
-def job_path(job_id: str, name: str) -> str:
-    """Generate deterministic zarr path for job artifacts."""
-
-    return f"{ZARR_STORE_PATH}/{job_id}/{name}.zarr"

@@ -1,8 +1,7 @@
 import os
 import socket
-import sys
 
-from dotenv import load_dotenv
+from cyclopts import run
 from google.cloud.storage import Client as StorageClient
 from tilebox.workflows import Client as WorkflowsClient
 from tilebox.workflows.cache import GoogleStorageCache
@@ -15,7 +14,7 @@ from tilebox.workflows.observability.tracing import (
     configure_otel_tracing_axiom,
 )
 
-from vci_workflow.cli import EndToEndVciWorkflow
+from vci_workflow.tasks.end_to_end import EndToEndFparToVideos
 from vci_workflow.tasks.fpar_to_zarr import (
     LoadDekadIntoZarr,
     WriteFparDataIntoEmptyZarr,
@@ -32,40 +31,49 @@ from vci_workflow.zarr import GCS_BUCKET
 
 logger = get_logger()
 
-if __name__ == "__main__":
-    # Load environment variables from .env file
-    if len(sys.argv) >= 2 and sys.argv[1] == "--load-dotenv":
-        load_dotenv()
+def start_runner(cluster: str | None = None) -> None:
+    """Start a Tilebox workflow runner for the FPAR to VCI video workflow.
+
+    The runner will run until it is manually stopped, executing tasks as they are submitted.
+
+    For automatically parallelizing the workflow, simply launch multiple instances of the runner as separate processes.
+
+    Args:
+        cluster: Optional Tilebox cluster to start the runner on.
+    """
 
     # Configure logging backends
     configure_console_logging()
-    configure_otel_logging_axiom(f"{socket.gethostname()}-{os.getpid()}")
 
-    # Configure tracing backends
-    configure_otel_tracing_axiom(f"{socket.gethostname()}-{os.getpid()}")
+    if "AXIOM_API_KEY" in os.environ:
+        # Optionally configure logging and tracing to Axiom for observability.
+        configure_otel_logging_axiom(f"{socket.gethostname()}-{os.getpid()}")
+        configure_otel_tracing_axiom(f"{socket.gethostname()}-{os.getpid()}")
 
     # Configure a GCS-backed cache for sharing metadata between tasks.
     storage_client = StorageClient()
     gcs_bucket = storage_client.bucket(GCS_BUCKET)
     cache = GoogleStorageCache(gcs_bucket, prefix="vci_workflow_cache")
 
-    # Get cluster configuration from environment variable
-    cluster = os.environ.get("TILEBOX_CLUSTER", None)
-
     # Start the runner
     client = WorkflowsClient()
     runner = client.runner(
         tasks=[
-            EndToEndVciWorkflow,
+            # end to end orchestration task
+            EndToEndFparToVideos,
+            # fpar to zarr tasks
+            WriteFparToZarr,
+            WriteFparDataIntoEmptyZarr,
+            LoadDekadIntoZarr,
+            # minmax computation tasks
+            ComputeMinMaxPerDekad,
+            ComputeMinMaxForChunk,
+            ComputeMinMaxForDekad,
+            # vci computation tasks
             ComputeVCI,
             ComputeVCIRecursively,
             ComputeVCIForDekad,
-            LoadDekadIntoZarr,
-            WriteFparToZarr,
-            WriteFparDataIntoEmptyZarr,
-            ComputeMinMaxPerDekad,
-            ComputeMinMaxForDekad,
-            ComputeMinMaxForChunk,
+            # video related tasks
             ZarrArrayToVideo,
             CreateFrames,
             ExportFrame,
@@ -77,3 +85,7 @@ if __name__ == "__main__":
 
     logger.info(f"Starting runner on cluster: {runner.tasks_to_run.cluster_slug}")
     runner.run_forever()
+
+
+if __name__ == "__main__":
+    run(start_runner)

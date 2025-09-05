@@ -1,3 +1,7 @@
+"""
+video contains Tilebox tasks for creating a timeseries video from a 3D Zarr array.
+"""
+
 import pickle
 import subprocess
 from functools import lru_cache
