@@ -2,6 +2,10 @@
 
 A modular Vegetation Condition Index (VCI) calculation pipeline built with Tilebox workflows.
 
+<p align="center">
+  <img src="../VCI.png"></a>
+</p>
+
 ## Architecture
 
 The workflow processes satellite FPAR data through four main stages:
