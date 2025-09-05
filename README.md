@@ -12,6 +12,15 @@ a cloud cluster.
   <img src="VCI.png"></a>
 </p>
 
+<div align="center">
+  <a href="https://youtu.be/s4wzyX9adWo">
+    <img src="https://img.shields.io/badge/FPAR-View_on_Youtube-red?logo=youtube&style=flat-square" alt="VCI Youtube"/>
+  </a>
+  <a href="https://youtu.be/AGr1OB91ZPk">
+    <img src="https://img.shields.io/badge/VCI-View_on_Youtube-red?logo=youtube&style=flat-square" alt="FPAR Youteube"/>
+  </a>
+</div>
+
 ## Workflow
 
 The workflow is implemented in `python` and is located in the [workflow](workflow/) directory.

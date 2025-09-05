@@ -6,6 +6,15 @@ A modular Vegetation Condition Index (VCI) calculation pipeline built with Tileb
   <img src="../VCI.png"></a>
 </p>
 
+<div align="center">
+  <a href="https://youtu.be/s4wzyX9adWo">
+    <img src="https://img.shields.io/badge/FPAR-View_on_Youtube-red?logo=youtube&style=flat-square" alt="VCI Youtube"/>
+  </a>
+  <a href="https://youtu.be/AGr1OB91ZPk">
+    <img src="https://img.shields.io/badge/VCI-View_on_Youtube-red?logo=youtube&style=flat-square" alt="FPAR Youteube"/>
+  </a>
+</div>
+
 ## Architecture
 
 The workflow processes satellite FPAR data through four main stages:
