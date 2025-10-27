@@ -1,3 +1,5 @@
+import os
+
 import zarr
 from obstore.auth.google import GoogleCredentialProvider
 from obstore.store import GCSStore
@@ -6,7 +8,7 @@ from zarr.core.common import AccessModeLiteral
 from zarr.storage import ObjectStore as ZarrObjectStore
 
 # --- Constants ---
-GCS_BUCKET = "vci-datacube-bucket-1513742"
+GCS_BUCKET = os.environ["GCS_BUCKET"]
 FILL_VALUE = 255
 START_YEAR_DEKAD = (2000, 15)
 
