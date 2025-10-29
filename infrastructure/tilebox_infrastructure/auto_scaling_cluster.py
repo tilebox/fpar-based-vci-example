@@ -5,10 +5,6 @@ from jinja2 import Environment, FileSystemLoader
 from pulumi import ComponentResource, Input, Output, ResourceOptions
 from pulumi_gcp.compute import (
     InstanceTemplate,
-    InstanceTemplateDiskArgs,
-    InstanceTemplateNetworkInterfaceArgs,
-    InstanceTemplateSchedulingArgs,
-    InstanceTemplateServiceAccountArgs,
     RegionAutoscaler,
     RegionInstanceGroupManager,
     Router,
@@ -138,25 +134,26 @@ class AutoScalingGCPCluster(ComponentResource):
                 "enable-oslogin": "TRUE",
             },
             disks=[
-                InstanceTemplateDiskArgs(
-                    source_image="cos-cloud/cos-stable",
-                    auto_delete=True,
-                    boot=True,
-                    disk_size_gb=20,
-                ),
+                {
+                    "source_image": "cos-cloud/cos-stable",
+                    "auto_delete": True,
+                    "boot": True,
+                    "disk_size_gb": 20,
+                },
             ],
-            network_interfaces=[InstanceTemplateNetworkInterfaceArgs(network="default")],
-            service_account=InstanceTemplateServiceAccountArgs(
-                email=service_account.email,
-                scopes=["https://www.googleapis.com/auth/cloud-platform"],
-            ),
+            network_interfaces=[{"network": "default"}],
+            service_account={
+                "email": service_account.email,
+                "scopes": ["https://www.googleapis.com/auth/cloud-platform"],
+            },
             # Use Spot VMs for cost savings. The API requires these specific scheduling options.
-            scheduling=InstanceTemplateSchedulingArgs(
-                provisioning_model="SPOT",
-                preemptible=True,
-                automatic_restart=False,
-                on_host_maintenance="TERMINATE",
-            ),
+            scheduling={
+                "provisioning_model": "SPOT",
+                "preemptible": True,
+                "automatic_restart": False,
+                "on_host_maintenance": "TERMINATE",
+                "instance_termination_action": "STOP",
+            },
             opts=ResourceOptions(depends_on=[service_account], parent=self),
         )
 
