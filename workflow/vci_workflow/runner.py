@@ -2,9 +2,8 @@ import os
 import socket
 
 from cyclopts import run
-from google.cloud.storage import Client as StorageClient
 from tilebox.workflows import Client as WorkflowsClient
-from tilebox.workflows.cache import GoogleStorageCache
+from tilebox.workflows.cache import AmazonS3Cache, GoogleStorageCache, JobCache
 from tilebox.workflows.observability.logging import (
     configure_console_logging,
     configure_otel_logging_axiom,
@@ -27,7 +26,7 @@ from vci_workflow.tasks.minmax import (
 )
 from vci_workflow.tasks.vci import ComputeVCI, ComputeVCIForDekad, ComputeVCIRecursively
 from vci_workflow.tasks.video import CreateFrames, CreateVideoFromFrames, ExportFrame, ZarrArrayToVideo
-from vci_workflow.zarr import GCS_BUCKET
+from vci_workflow.zarr import GCS_BUCKET, S3_BUCKET
 
 logger = get_logger()
 
@@ -52,14 +51,20 @@ def start_runner(cluster: str | None = None, tilebox_api_key: str | None = None)
     configure_console_logging()
 
     if "AXIOM_API_KEY" in os.environ:
-        # Optionally configure logging and tracing to Axiom for observability.
         configure_otel_logging_axiom(f"{socket.gethostname()}-{os.getpid()}")
         configure_otel_tracing_axiom(f"{socket.gethostname()}-{os.getpid()}")
 
-    # Configure a GCS-backed cache for sharing metadata between tasks.
-    storage_client = StorageClient()
-    gcs_bucket = storage_client.bucket(GCS_BUCKET)
-    cache = GoogleStorageCache(gcs_bucket, prefix="vci_workflow_cache")
+    # Configure a cloud-backed cache for sharing metadata between tasks
+    cache: JobCache
+    if S3_BUCKET:
+        cache = AmazonS3Cache(S3_BUCKET, prefix="vci_workflow_cache")
+    elif GCS_BUCKET:
+        from google.cloud.storage import Client as StorageClient
+        storage_client = StorageClient()
+        gcs_bucket = storage_client.bucket(GCS_BUCKET)
+        cache = GoogleStorageCache(gcs_bucket, prefix="vci_workflow_cache")
+    else:
+        raise ValueError("Either S3_BUCKET or GCS_BUCKET environment variable must be set")
 
     # Start the runner
     client = WorkflowsClient(token=tilebox_api_key)

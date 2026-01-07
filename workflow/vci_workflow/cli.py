@@ -49,7 +49,7 @@ def convert(time_range: str, fpar_store: str, cluster: str | None = None, tilebo
 
     Args:
         time_range: Time range to process, in the format "YYYY-MM-DD/YYYY-MM-DD"
-        fpar_store: Output Zarr path for the FPAR data
+        fpar_store: Output Zarr path (just the prefix, e.g. "fpar.zarr" - bucket is set via S3_BUCKET/GCS_BUCKET env var)
         cluster: Optional Tilebox cluster to submit the job to
         tilebox_api_key: A Tilebox API key to use for authentication. If not set, defaults to the TILEBOX_API_KEY
             environment variable. Go to https://console.tilebox.com/account/api-keys to create one.

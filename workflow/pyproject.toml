@@ -34,3 +34,4 @@ packages = ["vci_workflow"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["vci_workflow"]
+# rebuild for amd64

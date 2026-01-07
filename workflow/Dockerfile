@@ -1,8 +1,8 @@
 FROM python:3.13-slim
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y libexpat1 ffmpeg \
+# Install system dependencies (GDAL and build tools required for rasterio)
+RUN apt-get update && apt-get install -y libexpat1 ffmpeg gdal-bin libgdal-dev g++ \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 

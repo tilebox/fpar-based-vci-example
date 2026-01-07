@@ -178,7 +178,7 @@ class WriteFparDataIntoEmptyZarr(Task):
 
         # otherwise, submit leaf tasks to actually load each dekad
         for time_index in range(start, end):
-            context.submit_subtask(LoadDekadIntoZarr(self.zarr_path, time_index))
+            context.submit_subtask(LoadDekadIntoZarr(self.zarr_path, time_index), max_retries=3)
 
 
 class LoadDekadIntoZarr(Task):

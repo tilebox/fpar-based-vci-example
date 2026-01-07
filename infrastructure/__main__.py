@@ -1,22 +1,32 @@
 from pathlib import Path
 
 from pulumi import Config, ResourceOptions, export
-from pulumi_gcp.artifactregistry import Repository
-from pulumi_gcp.projects import Service
-from pulumi_gcp.storage import Bucket
-from tilebox_iac import AutoScalingGCPCluster, LocalBuildTrigger, Secret, TileboxNetwork
+from pulumi_aws.ecr import Repository, RepositoryImageScanningConfigurationArgs
+from pulumi_aws.s3 import (
+    Bucket,
+    BucketLifecycleConfiguration,
+    BucketLifecycleConfigurationRuleArgs,
+    BucketLifecycleConfigurationRuleExpirationArgs,
+    BucketLifecycleConfigurationRuleFilterArgs,
+)
+from pulumi_aws.ec2 import SecurityGroup, SecurityGroupEgressArgs
+from tilebox_iac.aws import AWSImageBuilder, AWSNetwork, AWSSecret, AutoScalingAWSCluster
 
-# Get the GCP project and region from the Pulumi config
-gcp_config = Config("gcp")
-gcp_project = gcp_config.require("project")
-gcp_region = gcp_config.require("region")
+# Get the AWS region from the Pulumi config
+aws_config = Config("aws")
+aws_region = aws_config.require("region")
+
+# Get the AWS account ID from caller identity
+from pulumi_aws import get_caller_identity
+
+aws_account_id = get_caller_identity().account_id
 
 # Get other configuration from the vci-infrastructure namespace
 infra_config = Config("vci-infrastructure")
 cluster_enabled = infra_config.require_bool("cluster_enabled")
 min_replicas = infra_config.require_int("min_replicas")
 max_replicas = infra_config.get_int("max_replicas") or 10
-machine_type = infra_config.get("machine_type") or "e2-standard-4"
+instance_type = infra_config.get("instance_type") or "t3.medium"
 cpu_target = infra_config.get_float("cpu_target") or 0.1
 tilebox_cluster = infra_config.get("tilebox_cluster")
 if tilebox_cluster is None:
@@ -34,63 +44,73 @@ axiom_traces_dataset = axiom_config.require("traces_dataset")
 
 workflow_dir = Path(__file__).parent.parent / "workflow"
 
-# Enable necessary GCP services declaratively. This makes the Pulumi program
-# self-contained and ensures that it can be run on a fresh GCP project.
-artifact_registry_api = Service("artifact-registry-api", service="artifactregistry.googleapis.com")
-storage_api = Service("storage-api", service="storage.googleapis.com")
-secret_manager = Service("secret-manager-api", service="secretmanager.googleapis.com")
-compute_api = Service("compute-api", service="compute.googleapis.com")
-iam_api = Service("iam-api", service="iam.googleapis.com")
-cloud_build_api = Service("cloud-build-api", service="cloudbuild.googleapis.com")
-
-# Create an Artifact Registry repository to store our Docker images
+# Create an ECR repository to store our Docker images
 repository = Repository(
     "vci-repository",
-    location=gcp_region,
-    repository_id="vci-runners",
-    format="DOCKER",
-    description="Repository for VCI workflow runner images.",
-    opts=ResourceOptions(depends_on=[artifact_registry_api]),
+    name="vci-runners",
+    image_tag_mutability="MUTABLE",
+    image_scanning_configuration=RepositoryImageScanningConfigurationArgs(scan_on_push=False),
 )
 
-build = LocalBuildTrigger(
+build = AWSImageBuilder(
     "vci-runner-image",
-    gcp_region=gcp_region,
-    gcp_project=gcp_project,
-    repository_id=repository.repository_id,
+    aws_region=aws_region,
+    aws_account_id=aws_account_id,
+    repository_name=repository.name,
     source_dir=workflow_dir,
     opts=ResourceOptions(depends_on=[repository]),
 )
 
-network = TileboxNetwork("vci-runner-network", gcp_region=gcp_region)
-
-# Create a GCS bucket to store the Zarr datacube
-bucket = Bucket(
-    "vci-runner-bucket",
-    location=gcp_region,
-    project=gcp_project,
-    uniform_bucket_level_access=True,
-    storage_class="STANDARD",
-    versioning={
-        "enabled": False,
-    },
-    lifecycle_rules=[
-        {
-            "action": {
-                "type": "Delete",
-            },
-            "condition": {
-                "age": 30,  # Automatically delete objects older than 30 days
-            },
-        },
-    ],
-    opts=ResourceOptions(depends_on=[storage_api]),
+network = AWSNetwork(
+    "vci-runner-network",
+    aws_region=aws_region,
+    enable_s3_endpoint=True,
+    enable_internet_access=True,
 )
 
-secret_tilebox_api_key = Secret("tilebox-api-key", secret_data=tilebox_api_key)
-secret_axiom_api_key = Secret("axiom-api-key", secret_data=axiom_api_key)
+# Create a security group for the instances
+security_group = SecurityGroup(
+    "vci-runner-sg",
+    vpc_id=network.vpc_id,
+    description="Security group for VCI runner instances",
+    egress=[
+        SecurityGroupEgressArgs(
+            from_port=0,
+            to_port=0,
+            protocol="-1",
+            cidr_blocks=["0.0.0.0/0"],
+            description="Allow all outbound traffic",
+        ),
+    ],
+    opts=ResourceOptions(depends_on=[network]),
+)
 
-cluster = AutoScalingGCPCluster(
+# Create an S3 bucket to store the Zarr datacube
+bucket = Bucket(
+    "vci-runner-bucket",
+    bucket_prefix="vci-runner-",
+)
+
+BucketLifecycleConfiguration(
+    "vci-runner-bucket-lifecycle",
+    bucket=bucket.id,
+    rules=[
+        BucketLifecycleConfigurationRuleArgs(
+            id="delete-old-objects",
+            status="Enabled",
+            filter=BucketLifecycleConfigurationRuleFilterArgs(),
+            expiration=BucketLifecycleConfigurationRuleExpirationArgs(
+                days=30,
+            ),
+        ),
+    ],
+    opts=ResourceOptions(depends_on=[bucket]),
+)
+
+secret_tilebox_api_key = AWSSecret("tilebox-api-key", secret_string=tilebox_api_key)
+secret_axiom_api_key = AWSSecret("axiom-api-key", secret_string=axiom_api_key)
+
+cluster = AutoScalingAWSCluster(
     "vci-runner",
     container={
         "image": build.container_image,
@@ -102,39 +122,31 @@ cluster = AutoScalingGCPCluster(
         "AXIOM_LOGS_DATASET": axiom_logs_dataset,
         "AXIOM_TRACES_DATASET": axiom_traces_dataset,
         "TILEBOX_CLUSTER": tilebox_cluster,
-        "GCS_BUCKET": bucket.name,
+        "S3_BUCKET": bucket.bucket,
     },
-    roles={
-        "roles": [
-            "roles/logging.logWriter",  # write logs to the logging console
+    iam_config={
+        "managed_policies": [
+            "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore",
         ],
-        "repository_roles": [
-            {
-                "repository_slug": "docker-container-images",
-                "repository": repository,
-                "role": "roles/artifactregistry.reader",  # pull the container image
-            }
-        ],
-        "bucket_roles": [
+        "bucket_access": [
             {
                 "bucket_slug": "vci-runner-bucket",
-                "bucket": bucket,
-                "role": "roles/storage.objectUser",  # create, read, update and delete objects in the bucket
+                "bucket_arn": bucket.arn,
+                "access_level": "readwrite",
             },
         ],
     },
-    gcp_project=gcp_project,
-    gcp_region=gcp_region,
-    machine_type=machine_type,
+    instance_type=instance_type,
     cpu_target=cpu_target,
     cluster_enabled=cluster_enabled,
     min_replicas_config=min_replicas,
     max_replicas_config=max_replicas,
-    network=network.network.id,
-    opts=ResourceOptions(depends_on=[build, secret_tilebox_api_key, secret_axiom_api_key, network]),
+    subnet_ids=[network.private_subnet_id],
+    security_group_ids=[security_group.id],
+    opts=ResourceOptions(depends_on=[build, secret_tilebox_api_key, secret_axiom_api_key, network, security_group]),
 )
 
-export("bucket_name", bucket.name)
-export("bucket_url", bucket.url)
+export("bucket_name", bucket.bucket)
+export("bucket_arn", bucket.arn)
 export("container_image", build.container_image)
 export("container_tag", build.tag)
