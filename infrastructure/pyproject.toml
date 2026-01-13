@@ -15,4 +15,4 @@ dependencies = [
 dev = ["pyright>=1.1.404", "ruff>=0.12.7"]
 
 [tool.uv.sources]
-tilebox-iac = { path = "../../tilebox-iac", editable = true }
+tilebox-iac = { git = "https://github.com/tilebox/tilebox-iac" }

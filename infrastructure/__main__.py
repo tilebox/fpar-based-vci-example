@@ -1,6 +1,8 @@
 from pathlib import Path
 
 from pulumi import Config, ResourceOptions, export
+from pulumi_aws import get_caller_identity
+from pulumi_aws.ec2 import SecurityGroup, SecurityGroupEgressArgs
 from pulumi_aws.ecr import Repository, RepositoryImageScanningConfigurationArgs
 from pulumi_aws.s3 import (
     Bucket,
@@ -9,15 +11,13 @@ from pulumi_aws.s3 import (
     BucketLifecycleConfigurationRuleExpirationArgs,
     BucketLifecycleConfigurationRuleFilterArgs,
 )
-from pulumi_aws.ec2 import SecurityGroup, SecurityGroupEgressArgs
-from tilebox_iac.aws import AWSImageBuilder, AWSNetwork, AWSSecret, AutoScalingAWSCluster
+from tilebox_iac.aws import AutoScalingCluster, LocalBuildTrigger, Network, Secret
 
 # Get the AWS region from the Pulumi config
 aws_config = Config("aws")
 aws_region = aws_config.require("region")
 
 # Get the AWS account ID from caller identity
-from pulumi_aws import get_caller_identity
 
 aws_account_id = get_caller_identity().account_id
 
@@ -52,7 +52,7 @@ repository = Repository(
     image_scanning_configuration=RepositoryImageScanningConfigurationArgs(scan_on_push=False),
 )
 
-build = AWSImageBuilder(
+build = LocalBuildTrigger(
     "vci-runner-image",
     aws_region=aws_region,
     aws_account_id=aws_account_id,
@@ -61,7 +61,7 @@ build = AWSImageBuilder(
     opts=ResourceOptions(depends_on=[repository]),
 )
 
-network = AWSNetwork(
+network = Network(
     "vci-runner-network",
     aws_region=aws_region,
     enable_s3_endpoint=True,
@@ -107,10 +107,10 @@ BucketLifecycleConfiguration(
     opts=ResourceOptions(depends_on=[bucket]),
 )
 
-secret_tilebox_api_key = AWSSecret("tilebox-api-key", secret_string=tilebox_api_key)
-secret_axiom_api_key = AWSSecret("axiom-api-key", secret_string=axiom_api_key)
+secret_tilebox_api_key = Secret("tilebox-api-key", tilebox_api_key)
+secret_axiom_api_key = Secret("axiom-api-key", axiom_api_key)
 
-cluster = AutoScalingAWSCluster(
+cluster = AutoScalingCluster(
     "vci-runner",
     container={
         "image": build.container_image,
