@@ -4,7 +4,7 @@ from pulumi import Config, ResourceOptions, export
 from pulumi_gcp.artifactregistry import Repository
 from pulumi_gcp.projects import Service
 from pulumi_gcp.storage import Bucket
-from tilebox_iac import AutoScalingGCPCluster, LocalBuildTrigger, Secret, TileboxNetwork
+from tilebox_iac.gcp import AutoScalingCluster, LocalBuildTrigger, Network, Secret
 
 # Get the GCP project and region from the Pulumi config
 gcp_config = Config("gcp")
@@ -62,7 +62,7 @@ build = LocalBuildTrigger(
     opts=ResourceOptions(depends_on=[repository]),
 )
 
-network = TileboxNetwork("vci-runner-network", gcp_region=gcp_region)
+network = Network("vci-runner-network", gcp_region=gcp_region)
 
 # Create a GCS bucket to store the Zarr datacube
 bucket = Bucket(
@@ -90,7 +90,7 @@ bucket = Bucket(
 secret_tilebox_api_key = Secret("tilebox-api-key", secret_data=tilebox_api_key)
 secret_axiom_api_key = Secret("axiom-api-key", secret_data=axiom_api_key)
 
-cluster = AutoScalingGCPCluster(
+cluster = AutoScalingCluster(
     "vci-runner",
     container={
         "image": build.container_image,
@@ -130,7 +130,7 @@ cluster = AutoScalingGCPCluster(
     cluster_enabled=cluster_enabled,
     min_replicas_config=min_replicas,
     max_replicas_config=max_replicas,
-    network=network.network.id,
+    network_interfaces=[{"network": network.network.id}],
     opts=ResourceOptions(depends_on=[build, secret_tilebox_api_key, secret_axiom_api_key, network]),
 )
 
