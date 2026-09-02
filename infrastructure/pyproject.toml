@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "IaC for an autoscaling Tilebox cluster for the VCI workflow utilizing GCP Spot instances."
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = ["pulumi>=3.186.0", "pulumi-gcp>=8.39.0", "tilebox-iac"]
+dependencies = ["pulumi>=3.226.0", "pulumi-gcp>=8.39.0", "tilebox-iac"]
 
 [dependency-groups]
 dev = ["pyright>=1.1.404", "ruff>=0.12.7"]
